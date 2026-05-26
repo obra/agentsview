@@ -58,7 +58,7 @@ test.describe("Insights quality rollout", () => {
         },
       }),
     );
-    await page.route("**/api/v1/check-update", (route) =>
+    await page.route("**/api/v1/update/check", (route) =>
       route.fulfill({
         json: {
           update_available: false,
@@ -141,10 +141,13 @@ test.describe("Insights quality rollout", () => {
     await expect(
       page.getByText("No generated insights saved."),
     ).toBeVisible();
-    await expect(
-      page
-        .getByRole("region", { name: "Generated Insights Archive" })
-        .getByRole("button", { name: "Generate" }),
-    ).toBeDisabled();
+    const generate = page
+      .getByRole("region", { name: "Generated Insights Archive" })
+      .getByRole("button", { name: "Generate" });
+    await expect(generate).toHaveAttribute(
+      "title",
+      "Generation is disabled in read-only mode",
+    );
+    await expect(generate).toBeDisabled();
   });
 });
