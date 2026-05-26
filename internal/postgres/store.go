@@ -102,6 +102,13 @@ func (s *Store) GetInsight(
 	return nil, nil
 }
 
+// GetCachedInsight returns nil in read-only remote mode.
+func (s *Store) GetCachedInsight(
+	_ context.Context, _ string,
+) (*db.Insight, error) {
+	return nil, nil
+}
+
 // RenameSession is not supported in read-only mode.
 func (s *Store) RenameSession(
 	_ string, _ *string,

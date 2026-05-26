@@ -221,3 +221,82 @@ func TestBuildPrompt(t *testing.T) {
 		})
 	}
 }
+
+func TestCannedInsightValidation(t *testing.T) {
+	payload := CannedAggregatePayload{
+		Kind:     CannedPromptMaturityReview,
+		DateFrom: "2025-01-15",
+		DateTo:   "2025-01-15",
+		EvidenceRefs: []CannedEvidenceRef{
+			{ID: "signals:score_distribution", Description: "scores"},
+		},
+	}
+	valid := `{
+		"schema_version":"llm_insight.v1",
+		"kind":"prompt_maturity_review",
+		"summary":"Tighten prompt starts.",
+		"confidence":"medium",
+		"recommendations":[{
+			"title":"Add acceptance criteria",
+			"rationale":"The score distribution supports reviewing prompt starts.",
+			"actions":["Add a done definition"],
+			"evidence_refs":["signals:score_distribution"],
+			"impact":"medium",
+			"effort":"low"
+		}],
+		"risks":[],
+		"evidence_refs":["signals:score_distribution"]
+	}`
+
+	env, err := ParseCannedEnvelope(valid)
+	if err != nil {
+		t.Fatalf("ParseCannedEnvelope: %v", err)
+	}
+	if err := ValidateCannedEnvelope(env, payload); err != nil {
+		t.Fatalf("ValidateCannedEnvelope: %v", err)
+	}
+
+	bad := strings.Replace(
+		valid,
+		`"signals:score_distribution"`,
+		`"signals:not_real"`,
+		1,
+	)
+	env, err = ParseCannedEnvelope(bad)
+	if err != nil {
+		t.Fatalf("Parse bad envelope: %v", err)
+	}
+	if err := ValidateCannedEnvelope(env, payload); err == nil {
+		t.Fatalf("expected validation error for unknown evidence ref")
+	}
+}
+
+func TestBuildCannedPromptIncludesBoundaries(t *testing.T) {
+	payload := CannedAggregatePayload{
+		Kind:     CannedToolReliabilityReview,
+		DateFrom: "2025-01-15",
+		DateTo:   "2025-01-16",
+		EvidenceRefs: []CannedEvidenceRef{
+			{ID: "signals:tool_health", Description: "tool health"},
+		},
+	}
+	hash, err := CannedAggregateHash(payload)
+	if err != nil {
+		t.Fatalf("CannedAggregateHash: %v", err)
+	}
+	prompt, err := BuildCannedPrompt(payload, hash)
+	if err != nil {
+		t.Fatalf("BuildCannedPrompt: %v", err)
+	}
+	for _, want := range []string{
+		"Output JSON only",
+		"Do not recalculate, override",
+		"tool_reliability_review",
+		hash,
+		"Aggregate payload JSON",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q: %s", want, prompt)
+		}
+	}
+}

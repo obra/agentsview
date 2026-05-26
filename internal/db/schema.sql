@@ -256,6 +256,15 @@ CREATE TABLE IF NOT EXISTS insights (
     model       TEXT,
     prompt      TEXT,
     content     TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT '',
+    schema_version TEXT NOT NULL DEFAULT '',
+    template_id TEXT NOT NULL DEFAULT '',
+    template_version TEXT NOT NULL DEFAULT '',
+    aggregate_hash TEXT NOT NULL DEFAULT '',
+    cache_key   TEXT NOT NULL DEFAULT '',
+    cache_status TEXT NOT NULL DEFAULT '',
+    provenance_json TEXT NOT NULL DEFAULT '',
+    structured_json TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL
         DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );

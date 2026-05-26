@@ -3,6 +3,7 @@ import type {
   InsightsResponse,
   InsightType,
   AgentName,
+  CannedInsightKind,
 } from "../api/types.js";
 import {
   ApiError as GeneratedApiError,
@@ -29,6 +30,7 @@ export interface InsightTask {
   dateTo: string;
   project: string;
   agent: AgentName;
+  kind?: CannedInsightKind;
   status: "generating" | "done" | "error";
   phase: string;
   error: string | null;
@@ -42,6 +44,7 @@ class InsightsStore {
   dateFrom: string = $state(localDateStr(new Date()));
   dateTo: string = $state(localDateStr(new Date()));
   type: InsightType = $state("daily_activity");
+  cannedKind: CannedInsightKind = $state("prompt_maturity_review");
   project: string = $state("");
   agent: AgentName = $state("claude");
   items: Insight[] = $state([]);
@@ -114,6 +117,10 @@ class InsightsStore {
     this.type = type;
   }
 
+  setCannedKind(kind: CannedInsightKind) {
+    this.cannedKind = kind;
+  }
+
   setProject(project: string) {
     this.project = project;
   }
@@ -140,6 +147,9 @@ class InsightsStore {
       dateTo: this.dateTo,
       project: this.project,
       agent: this.agent,
+      kind: this.type === "llm_canned"
+        ? this.cannedKind
+        : undefined,
     };
 
     const task: InsightTask = {
@@ -149,6 +159,7 @@ class InsightsStore {
       dateTo: snap.dateTo,
       project: snap.project,
       agent: snap.agent,
+      kind: snap.kind,
       status: "generating",
       phase: "generating",
       error: null,
@@ -165,6 +176,10 @@ class InsightsStore {
         project: snap.project || undefined,
         prompt: this.promptText || undefined,
         agent: snap.agent,
+        kind: snap.kind,
+        llm_opt_in: snap.type === "llm_canned"
+          ? true
+          : undefined,
       },
       (phase) => {
         this.tasks = this.tasks.map((t) =>

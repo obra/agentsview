@@ -816,6 +816,42 @@ func (db *DB) migrateColumns() error {
 			"sessions", "secrets_rules_version",
 			"ALTER TABLE sessions ADD COLUMN secrets_rules_version TEXT NOT NULL DEFAULT ''",
 		},
+		{
+			"insights", "kind",
+			"ALTER TABLE insights ADD COLUMN kind TEXT NOT NULL DEFAULT ''",
+		},
+		{
+			"insights", "schema_version",
+			"ALTER TABLE insights ADD COLUMN schema_version TEXT NOT NULL DEFAULT ''",
+		},
+		{
+			"insights", "template_id",
+			"ALTER TABLE insights ADD COLUMN template_id TEXT NOT NULL DEFAULT ''",
+		},
+		{
+			"insights", "template_version",
+			"ALTER TABLE insights ADD COLUMN template_version TEXT NOT NULL DEFAULT ''",
+		},
+		{
+			"insights", "aggregate_hash",
+			"ALTER TABLE insights ADD COLUMN aggregate_hash TEXT NOT NULL DEFAULT ''",
+		},
+		{
+			"insights", "cache_key",
+			"ALTER TABLE insights ADD COLUMN cache_key TEXT NOT NULL DEFAULT ''",
+		},
+		{
+			"insights", "cache_status",
+			"ALTER TABLE insights ADD COLUMN cache_status TEXT NOT NULL DEFAULT ''",
+		},
+		{
+			"insights", "provenance_json",
+			"ALTER TABLE insights ADD COLUMN provenance_json TEXT NOT NULL DEFAULT ''",
+		},
+		{
+			"insights", "structured_json",
+			"ALTER TABLE insights ADD COLUMN structured_json TEXT NOT NULL DEFAULT ''",
+		},
 	}
 
 	for _, m := range migrations {
@@ -857,6 +893,15 @@ func (db *DB) migrateColumns() error {
 	); err != nil {
 		return fmt.Errorf(
 			"creating idx_sessions_termination_status: %w", err,
+		)
+	}
+	if _, err := w.Exec(
+		`CREATE INDEX IF NOT EXISTS idx_insights_cache
+		 ON insights(cache_key, created_at DESC)
+		 WHERE cache_key != ''`,
+	); err != nil {
+		return fmt.Errorf(
+			"creating idx_insights_cache: %w", err,
 		)
 	}
 

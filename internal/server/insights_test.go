@@ -196,6 +196,133 @@ func TestGenerateInsight_DefaultAgent(t *testing.T) {
 	assertBodyContains(t, w, "stub: no CLI")
 }
 
+func TestGenerateCannedInsight_RequiresExplicitOptIn(t *testing.T) {
+	te := setup(t)
+
+	w := te.post(t, "/api/v1/insights/generate",
+		`{"type":"llm_canned","kind":"prompt_maturity_review","date_from":"2025-01-15","date_to":"2025-01-15","agent":"claude"}`)
+
+	assertStatus(t, w, http.StatusBadRequest)
+	assertBodyContains(t, w, "llm_opt_in")
+}
+
+func TestGenerateCannedInsight_SaveCacheAndPreserveSignals(t *testing.T) {
+	var calls atomic.Int32
+	stubGen := func(
+		_ context.Context, agent, prompt string, _ insight.LogFunc,
+	) (insight.Result, error) {
+		calls.Add(1)
+		if agent != "claude" {
+			t.Fatalf("agent = %q, want claude", agent)
+		}
+		if !strings.Contains(prompt, "Do not recalculate, override") {
+			t.Fatalf("prompt missing score boundary: %s", prompt)
+		}
+		return insight.Result{
+			Agent: "claude",
+			Model: "test-model",
+			Content: `{
+				"schema_version":"llm_insight.v1",
+				"kind":"prompt_maturity_review",
+				"summary":"Prompt starts are mostly healthy, with a few places to tighten acceptance criteria.",
+				"confidence":"medium",
+				"recommendations":[{
+					"title":"Add explicit verification asks",
+					"rationale":"The selected aggregate has scored sessions and outcome data, so verification wording can be improved without changing scores.",
+					"actions":["Add acceptance criteria to implementation prompts","Ask for validation commands in task handoffs"],
+					"evidence_refs":["signals:score_distribution","signals:outcomes"],
+					"impact":"medium",
+					"effort":"low"
+				}],
+				"risks":[{
+					"title":"Evidence is aggregate-only",
+					"explanation":"This recommendation does not inspect raw transcript text.",
+					"evidence_refs":["signals:score_distribution"]
+				}],
+				"evidence_refs":["signals:score_distribution","signals:outcomes"]
+			}`,
+		}, nil
+	}
+	te := setupWithServerOpts(t, []server.Option{
+		server.WithGenerateStreamFunc(stubGen),
+	})
+	te.seedSession(t, "quality-1", "my-app", 6)
+	score := 86
+	grade := "B"
+	if err := te.db.UpdateSessionSignals("quality-1", db.SessionSignalUpdate{
+		ToolFailureSignalCount: 2,
+		ToolRetryCount:         1,
+		Outcome:                "completed",
+		OutcomeConfidence:      "high",
+		EndedWithRole:          "assistant",
+		HealthScore:            &score,
+		HealthGrade:            &grade,
+		HasToolCalls:           true,
+		HasContextData:         true,
+	}); err != nil {
+		t.Fatalf("UpdateSessionSignals: %v", err)
+	}
+	before, err := te.db.GetSession(context.Background(), "quality-1")
+	if err != nil {
+		t.Fatalf("GetSession before: %v", err)
+	}
+
+	payload := `{"type":"llm_canned","kind":"prompt_maturity_review","date_from":"2025-01-15","date_to":"2025-01-15","project":"my-app","agent":"claude","llm_opt_in":true}`
+	w := te.post(t, "/api/v1/insights/generate", payload)
+	assertStatus(t, w, http.StatusOK)
+	events := parseSSE(w.Body.String())
+	if len(events) == 0 || events[len(events)-1].Event != "done" {
+		t.Fatalf("expected done event, got %s", w.Body.String())
+	}
+
+	var saved db.Insight
+	if err := json.Unmarshal([]byte(events[len(events)-1].Data), &saved); err != nil {
+		t.Fatalf("decode saved insight: %v", err)
+	}
+	if saved.Type != insight.CannedType {
+		t.Fatalf("Type = %q, want %q", saved.Type, insight.CannedType)
+	}
+	if saved.Kind != "prompt_maturity_review" {
+		t.Fatalf("Kind = %q", saved.Kind)
+	}
+	if saved.SchemaVersion != insight.CannedSchemaVersion ||
+		saved.TemplateID == "" || saved.AggregateHash == "" ||
+		saved.CacheKey == "" || saved.CacheStatus != "fresh" ||
+		saved.ProvenanceJSON == "" || saved.StructuredJSON == "" {
+		t.Fatalf("missing canned metadata: %+v", saved)
+	}
+	if !strings.Contains(saved.Content, "AI-generated recommendation") {
+		t.Fatalf("content missing generated label: %s", saved.Content)
+	}
+
+	after, err := te.db.GetSession(context.Background(), "quality-1")
+	if err != nil {
+		t.Fatalf("GetSession after: %v", err)
+	}
+	if *after.HealthScore != *before.HealthScore ||
+		*after.HealthGrade != *before.HealthGrade ||
+		after.ToolFailureSignalCount != before.ToolFailureSignalCount ||
+		after.ToolRetryCount != before.ToolRetryCount {
+		t.Fatalf("canonical signals changed: before=%+v after=%+v", before, after)
+	}
+
+	w = te.post(t, "/api/v1/insights/generate", payload)
+	assertStatus(t, w, http.StatusOK)
+	if calls.Load() != 1 {
+		t.Fatalf("generator calls = %d, want 1 after cache hit", calls.Load())
+	}
+	events = parseSSE(w.Body.String())
+	foundCacheHit := false
+	for _, ev := range events {
+		if ev.Event == "status" && strings.Contains(ev.Data, "cache_hit") {
+			foundCacheHit = true
+		}
+	}
+	if !foundCacheHit {
+		t.Fatalf("expected cache_hit status, got %s", w.Body.String())
+	}
+}
+
 func TestGenerateInsight_ErrorMessageStripsStderr(t *testing.T) {
 	stubGen := func(
 		_ context.Context, _, _ string,

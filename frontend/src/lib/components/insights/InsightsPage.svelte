@@ -3,9 +3,15 @@
   import { analytics } from "../../stores/analytics.svelte.js";
   import { insights } from "../../stores/insights.svelte.js";
   import { sessions } from "../../stores/sessions.svelte.js";
+  import { sync } from "../../stores/sync.svelte.js";
   import { events } from "../../stores/events.svelte.js";
   import { renderMarkdown } from "../../utils/markdown.js";
   import { scoreToGrade } from "../../utils/grade.js";
+  import type {
+    AgentName,
+    CannedInsightKind,
+    InsightType,
+  } from "../../api/types.js";
   import DateRangeSelector from "../shared/DateRangeSelector.svelte";
   import ProjectTypeahead from "../layout/ProjectTypeahead.svelte";
   import {
@@ -29,6 +35,12 @@
   );
   const loading = $derived(analytics.loading.signals);
   const error = $derived(analytics.errors.signals);
+  const readOnly = $derived(
+    sync.serverVersion?.read_only === true,
+  );
+  const generationUnavailable = $derived(
+    sync.serverVersion === null || readOnly,
+  );
   const hasData = $derived(
     summary.totalSessions > 0 || summary.computedQualitySessions > 0,
   );
@@ -52,6 +64,30 @@
     const select = e.target as HTMLSelectElement;
     analytics.agent = select.value;
     fetchInsightSignals();
+  }
+
+  function handleInsightAgentChange(e: Event) {
+    const select = e.target as HTMLSelectElement;
+    insights.setAgent(select.value as AgentName);
+  }
+
+  function handleCannedKindChange(e: Event) {
+    const select = e.target as HTMLSelectElement;
+    insights.setCannedKind(select.value as CannedInsightKind);
+  }
+
+  function handlePromptChange(e: Event) {
+    const textarea = e.target as HTMLTextAreaElement;
+    insights.promptText = textarea.value;
+  }
+
+  function handleGenerateCanned() {
+    if (generationUnavailable) return;
+    insights.setType("llm_canned");
+    insights.setDateFrom(analytics.from);
+    insights.setDateTo(analytics.to);
+    insights.setProject(analytics.project);
+    insights.generate();
   }
 
   function handleRefresh() {
@@ -107,6 +143,42 @@
 
   function maxTrend(pattern: QualityPatternView): number {
     return Math.max(1, ...pattern.trend.map((p) => p.value));
+  }
+
+  function cannedKindLabel(
+    kind: CannedInsightKind | "" | undefined,
+  ): string {
+    switch (kind) {
+      case "prompt_maturity_review":
+        return "Prompt Maturity";
+      case "context_setup_review":
+        return "Context Setup";
+      case "workflow_hygiene_review":
+        return "Workflow Hygiene";
+      case "tool_reliability_review":
+        return "Tool Reliability";
+      case "model_cost_review":
+        return "Model and Cost";
+      case "instruction_opportunity_review":
+        return "Instruction Opportunities";
+      default:
+        return "Generated Recommendation";
+    }
+  }
+
+  function insightTypeLabel(
+    type: InsightType,
+    kind: CannedInsightKind | "" | undefined,
+  ): string {
+    if (type === "llm_canned") return cannedKindLabel(kind);
+    if (type === "agent_analysis") return "Agent Analysis";
+    return "Activity";
+  }
+
+  function cacheStatusLabel(status: string | undefined): string {
+    if (status === "hit") return "cache hit";
+    if (status === "fresh") return "fresh";
+    return "";
   }
 
   onMount(() => {
@@ -427,6 +499,64 @@
         </p>
       </div>
 
+      <div class="generated-controls">
+        <label class="generated-control">
+          <span>Template</span>
+          <select
+            class="generated-select"
+            value={insights.cannedKind}
+            onchange={handleCannedKindChange}
+          >
+            <option value="prompt_maturity_review">Prompt Maturity</option>
+            <option value="context_setup_review">Context Setup</option>
+            <option value="workflow_hygiene_review">Workflow Hygiene</option>
+            <option value="tool_reliability_review">Tool Reliability</option>
+            <option value="model_cost_review">Model and Cost</option>
+            <option value="instruction_opportunity_review">
+              Instruction Opportunities
+            </option>
+          </select>
+        </label>
+
+        <label class="generated-control">
+          <span>Model agent</span>
+          <select
+            class="generated-select"
+            value={insights.agent}
+            onchange={handleInsightAgentChange}
+          >
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+            <option value="copilot">Copilot</option>
+            <option value="gemini">Gemini</option>
+            <option value="kiro">Kiro</option>
+          </select>
+        </label>
+
+        <label class="generated-control focus-control">
+          <span>Optional focus</span>
+          <textarea
+            class="generated-focus"
+            value={insights.promptText}
+            maxlength="1200"
+            rows="2"
+            placeholder="Narrow the recommendation without changing scored facts"
+            oninput={handlePromptChange}
+          ></textarea>
+        </label>
+
+        <button
+          class="generate-action"
+          disabled={generationUnavailable}
+          title={readOnly
+            ? "Generation is disabled in read-only mode"
+            : "Generate quality recommendation"}
+          onclick={handleGenerateCanned}
+        >
+          Generate
+        </button>
+      </div>
+
       {#if insights.loading}
         <div class="state-panel compact-state">Loading archive...</div>
       {:else if insights.items.length === 0 && insights.tasks.length === 0}
@@ -449,7 +579,9 @@
               >
                 <span>{task.status === "error" ? "Error" : "Running"}</span>
                 <strong>{task.project || "global"}</strong>
-                <em>{task.phase}</em>
+                <em>
+                  {task.kind ? cannedKindLabel(task.kind) : task.phase}
+                </em>
               </button>
             {/each}
             {#each insights.items as item (item.id)}
@@ -458,9 +590,7 @@
                 onclick={() => insights.select(item.id)}
               >
                 <span>
-                  {item.type === "agent_analysis"
-                    ? "Agent analysis"
-                    : "Activity"}
+                  {insightTypeLabel(item.type, item.kind)}
                 </span>
                 <strong>{item.project || "global"}</strong>
                 <em>
@@ -485,7 +615,31 @@
               {/if}
             {:else if insights.selectedItem}
               <div class="generated-detail-head">
-                <span class="badge generated">Generated</span>
+                <div class="generated-meta">
+                  <span class="badge generated">
+                    {insightTypeLabel(
+                      insights.selectedItem.type,
+                      insights.selectedItem.kind,
+                    )}
+                  </span>
+                  {#if insights.selectedItem.type === "llm_canned"}
+                    {#if cacheStatusLabel(insights.selectedItem.cache_status)}
+                      <span class="detail-chip muted">
+                        {cacheStatusLabel(insights.selectedItem.cache_status)}
+                      </span>
+                    {/if}
+                    {#if insights.selectedItem.template_version}
+                      <span class="detail-chip muted">
+                        template {insights.selectedItem.template_version}
+                      </span>
+                    {/if}
+                    {#if insights.selectedItem.aggregate_hash}
+                      <span class="detail-chip muted">
+                        aggregate {insights.selectedItem.aggregate_hash.slice(0, 12)}
+                      </span>
+                    {/if}
+                  {/if}
+                </div>
                 <button
                   class="text-btn danger"
                   onclick={() => {
@@ -975,6 +1129,69 @@
     padding-top: 18px;
   }
 
+  .generated-controls {
+    display: grid;
+    grid-template-columns: minmax(180px, 220px) minmax(130px, 160px) minmax(240px, 1fr) auto;
+    gap: 10px;
+    align-items: end;
+    padding: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius-md);
+  }
+
+  .generated-control {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .generated-control span {
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .generated-select,
+  .generated-focus {
+    width: 100%;
+    border: 1px solid var(--border-muted);
+    background: var(--bg-inset);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 12px;
+  }
+
+  .generated-select {
+    height: 30px;
+    padding: 0 8px;
+  }
+
+  .generated-focus {
+    min-height: 30px;
+    max-height: 76px;
+    padding: 7px 8px;
+    resize: vertical;
+    line-height: 1.35;
+  }
+
+  .generate-action {
+    height: 30px;
+    padding: 0 12px;
+    background: var(--accent-purple);
+    color: white;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .generate-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
   .generated-layout {
     display: grid;
     grid-template-columns: minmax(240px, 320px) 1fr;
@@ -1036,7 +1253,35 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
     margin-bottom: 12px;
+  }
+
+  .generated-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .detail-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 18px;
+    padding: 2px 6px;
+    border: 1px solid var(--border-muted);
+    border-radius: 3px;
+    color: var(--text-secondary);
+    background: var(--bg-inset);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .detail-chip.muted {
+    color: var(--text-muted);
   }
 
   .text-btn {
@@ -1202,6 +1447,7 @@
     .summary-grid,
     .pattern-grid,
     .recommendation-list,
+    .generated-controls,
     .generated-layout {
       grid-template-columns: 1fr;
     }

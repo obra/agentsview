@@ -87,6 +87,7 @@ type Store interface {
 	// Insights (local-only; PG returns ErrReadOnly).
 	ListInsights(ctx context.Context, f InsightFilter) ([]Insight, error)
 	GetInsight(ctx context.Context, id int64) (*Insight, error)
+	GetCachedInsight(ctx context.Context, cacheKey string) (*Insight, error)
 	InsertInsight(s Insight) (int64, error)
 	DeleteInsight(id int64) error
 
