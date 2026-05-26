@@ -4,6 +4,7 @@ import {
   buildQualityPatterns,
   buildQualitySummary,
   buildRuleBasedRecommendations,
+  QUALITY_PATTERN_SEVERITY_THRESHOLDS,
 } from "./qualityPatterns.js";
 
 function makeSignals(
@@ -122,6 +123,14 @@ describe("quality pattern transforms", () => {
     expect(prompt.title).toBe("Prompt maturity");
     expect(prompt.totalSessions).toBe(4);
     expect(prompt.affectedSessions).toBe(2);
+    expect(prompt.severity).toBe("critical");
+    expect(prompt.trendLabel).toBe("Score-pressure proxy");
+    expect(prompt.trend[0]).toEqual(
+      expect.objectContaining({
+        value: 20,
+        label: "points below 100 average score",
+      }),
+    );
     expect(prompt.drivers).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -178,5 +187,85 @@ describe("quality pattern transforms", () => {
     expect(
       buildRuleBasedRecommendations(buildQualityPatterns(signals)),
     ).toEqual([]);
+  });
+
+  it("uses documented severity threshold boundaries", () => {
+    const belowWarning = makeSignals({
+      quality_health: {
+        computed_sessions: 100,
+        totals: {
+          short_prompt_count: 17,
+          unstructured_start: 0,
+          missing_success_criteria_count: 0,
+          missing_verification_count: 0,
+          duplicate_prompt_count: 0,
+          no_code_context_count: 0,
+          runaway_tool_loop_count: 0,
+        },
+        sessions_with_signal: {
+          short_prompt_count: 17,
+          unstructured_start: 0,
+          missing_success_criteria_count: 0,
+          missing_verification_count: 0,
+          duplicate_prompt_count: 0,
+          no_code_context_count: 0,
+          runaway_tool_loop_count: 0,
+        },
+      },
+    });
+    const warning = makeSignals({
+      quality_health: {
+        computed_sessions: 100,
+        totals: {
+          short_prompt_count:
+            QUALITY_PATTERN_SEVERITY_THRESHOLDS.warningRatio * 100,
+          unstructured_start: 0,
+          missing_success_criteria_count: 0,
+          missing_verification_count: 0,
+          duplicate_prompt_count: 0,
+          no_code_context_count: 0,
+          runaway_tool_loop_count: 0,
+        },
+        sessions_with_signal: {
+          short_prompt_count:
+            QUALITY_PATTERN_SEVERITY_THRESHOLDS.warningRatio * 100,
+          unstructured_start: 0,
+          missing_success_criteria_count: 0,
+          missing_verification_count: 0,
+          duplicate_prompt_count: 0,
+          no_code_context_count: 0,
+          runaway_tool_loop_count: 0,
+        },
+      },
+    });
+    const critical = makeSignals({
+      quality_health: {
+        computed_sessions: 100,
+        totals: {
+          short_prompt_count:
+            QUALITY_PATTERN_SEVERITY_THRESHOLDS.criticalRatio * 100,
+          unstructured_start: 0,
+          missing_success_criteria_count: 0,
+          missing_verification_count: 0,
+          duplicate_prompt_count: 0,
+          no_code_context_count: 0,
+          runaway_tool_loop_count: 0,
+        },
+        sessions_with_signal: {
+          short_prompt_count:
+            QUALITY_PATTERN_SEVERITY_THRESHOLDS.criticalRatio * 100,
+          unstructured_start: 0,
+          missing_success_criteria_count: 0,
+          missing_verification_count: 0,
+          duplicate_prompt_count: 0,
+          no_code_context_count: 0,
+          runaway_tool_loop_count: 0,
+        },
+      },
+    });
+
+    expect(buildQualityPatterns(belowWarning)[0]?.severity).toBe("watch");
+    expect(buildQualityPatterns(warning)[0]?.severity).toBe("warning");
+    expect(buildQualityPatterns(critical)[0]?.severity).toBe("critical");
   });
 });

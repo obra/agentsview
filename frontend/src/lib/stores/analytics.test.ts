@@ -233,6 +233,8 @@ async function loadAnalyticsStore() {
 
 function resetStore() {
   analytics.selectedDate = null;
+  analytics.selectedDow = null;
+  analytics.selectedHour = null;
   analytics.project = "";
   analytics.machine = "";
   analytics.from = "2024-01-01";
@@ -875,5 +877,32 @@ describe("AnalyticsStore rolling default date range", () => {
     expect(analytics.selectedDate).toBeNull();
     expect(analytics.selectedDow).toBeNull();
     expect(analytics.selectedHour).toBeNull();
+  });
+
+  it("fetchSignalsForInsights clears hidden drill-down filters", async () => {
+    const { analytics } = await loadAnalyticsStore();
+    analytics.from = "2026-04-01";
+    analytics.to = "2026-04-30";
+    analytics.selectedDate = "2026-04-12";
+    analytics.selectedDow = 2;
+    analytics.selectedHour = 16;
+
+    await analytics.fetchSignalsForInsights();
+
+    expect(analytics.selectedDate).toBeNull();
+    expect(analytics.selectedDow).toBeNull();
+    expect(analytics.selectedHour).toBeNull();
+    expect(api.getAnalyticsSignals).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "2026-04-01",
+        to: "2026-04-30",
+      }),
+    );
+    expect(api.getAnalyticsSignals).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        dow: expect.anything(),
+        hour: expect.anything(),
+      }),
+    );
   });
 });

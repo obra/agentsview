@@ -39,19 +39,23 @@
     ),
   );
 
+  function fetchInsightSignals() {
+    analytics.fetchSignalsForInsights();
+  }
+
   function handleProjectChange(value: string) {
     analytics.project = value;
-    analytics.fetchSignals();
+    fetchInsightSignals();
   }
 
   function handleAgentChange(e: Event) {
     const select = e.target as HTMLSelectElement;
     analytics.agent = select.value;
-    analytics.fetchSignals();
+    fetchInsightSignals();
   }
 
   function handleRefresh() {
-    analytics.fetchSignals();
+    fetchInsightSignals();
     insights.load();
   }
 
@@ -102,19 +106,19 @@
   }
 
   function maxTrend(pattern: QualityPatternView): number {
-    return Math.max(1, ...pattern.trend.map((p) => p.affected));
+    return Math.max(1, ...pattern.trend.map((p) => p.value));
   }
 
   onMount(() => {
     sessions.loadProjects();
-    analytics.fetchSignals();
+    fetchInsightSignals();
     insights.load();
     refreshTimer = setInterval(
-      () => analytics.fetchSignals(),
+      () => fetchInsightSignals(),
       REFRESH_INTERVAL_MS,
     );
     unsubEvents = events.subscribeDebounced(() => {
-      analytics.fetchSignals();
+      fetchInsightSignals();
     });
   });
 
@@ -155,7 +159,7 @@
         headerMinUserMessages > 0 ? headerMinUserMessages : 0;
       analytics.includeOneShot = headerIncludeOneShot;
       analytics.includeAutomated = headerIncludeAutomated;
-      untrack(() => analytics.fetchSignals());
+      untrack(() => fetchInsightSignals());
     }
   });
 
@@ -238,7 +242,7 @@
         <div class="state-panel error" role="alert">
           <strong>Could not load deterministic insights.</strong>
           <span>{error}</span>
-          <button onclick={() => analytics.fetchSignals()}>
+          <button onclick={fetchInsightSignals}>
             Retry
           </button>
         </div>
@@ -344,19 +348,21 @@
 
               <div
                 class="sparkline"
-                aria-label={`${pattern.title} trend`}
+                aria-label={`${pattern.title}: ${pattern.trendLabel}`}
               >
+                <span class="trend-caption">{pattern.trendLabel}</span>
                 {#each pattern.trend.slice(-16) as point}
                   <span
-                    title={`${formatDate(point.date)}: ${point.affected}`}
-                    style:height={`${Math.max(8, (point.affected / maxTrend(pattern)) * 32)}px`}
+                    title={`${formatDate(point.date)}: ${point.value} ${point.label}`}
+                    style:height={`${Math.max(8, (point.value / maxTrend(pattern)) * 32)}px`}
                   ></span>
                 {/each}
               </div>
+              <p class="severity-note">{pattern.severityDescription}</p>
 
               {#if pattern.examples.length > 0}
                 <div class="examples">
-                  <span class="examples-label">Evidence groups</span>
+                  <span class="examples-label">{pattern.examplesLabel}</span>
                   {#each pattern.examples as example}
                     <div class="example-row">
                       <span>{example.label}</span>
@@ -416,7 +422,8 @@
         </div>
         <p>
           Saved generated text is shown separately and does not affect
-          deterministic quality scores.
+          deterministic quality scores. Creation remains out of scope
+          for this deterministic phase.
         </p>
       </div>
 
@@ -427,7 +434,8 @@
           <strong>No generated insights saved.</strong>
           <span>
             The deterministic dashboard above works without LLM
-            configuration.
+            configuration. Generated insight creation is reserved for
+            the generated-insights phase.
           </span>
         </div>
       {:else}
@@ -865,9 +873,10 @@
     gap: 3px;
     padding: 6px 0 2px;
     border-top: 1px solid var(--border-muted);
+    position: relative;
   }
 
-  .sparkline span {
+  .sparkline span:not(.trend-caption) {
     width: 100%;
     min-width: 3px;
     max-width: 16px;
@@ -877,6 +886,28 @@
       var(--border-muted)
     );
     border-radius: 2px 2px 0 0;
+  }
+
+  .trend-caption {
+    align-self: start;
+    width: auto;
+    min-width: 118px;
+    max-width: none;
+    height: auto !important;
+    margin-right: 8px;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: transparent;
+  }
+
+  .severity-note {
+    margin-top: -4px;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.35;
   }
 
   .examples {

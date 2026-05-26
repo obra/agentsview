@@ -708,6 +708,13 @@ class AnalyticsStore {
     );
   }
 
+  async fetchSignalsForInsights() {
+    this.selectedDate = null;
+    this.selectedDow = null;
+    this.selectedHour = null;
+    await this.fetchSignals();
+  }
+
   setTopMetric(m: TopSessionsMetric) {
     this.topMetric = m;
     this.fetchTopSessions();

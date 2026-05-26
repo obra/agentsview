@@ -30,15 +30,19 @@ export interface QualityPatternView {
   title: string;
   summary: string;
   severity: QualityPatternSeverity;
+  severityDescription: string;
   affectedSessions: number;
   totalSessions: number;
   drivers: QualityPatternDriver[];
+  trendLabel: string;
   trend: Array<{
     date: string;
-    affected: number;
+    value: number;
+    label: string;
     score: number | null;
   }>;
   examples: QualityPatternExample[];
+  examplesLabel: string;
   action: string;
 }
 
@@ -71,6 +75,11 @@ const emptyTotals: QualitySignalTotals = {
   no_code_context_count: 0,
   runaway_tool_loop_count: 0,
 };
+
+export const QUALITY_PATTERN_SEVERITY_THRESHOLDS = {
+  warningRatio: 0.18,
+  criticalRatio: 0.35,
+} as const;
 
 export function buildQualitySummary(
   signals: SignalsAnalyticsResponse | null,
@@ -190,11 +199,16 @@ function promptMaturityPattern(
     severity: computed === 0
       ? "unavailable"
       : severityFromRatio(affected, computed),
+    severityDescription: computed === 0
+      ? "No Phase 3 prompt-quality computations are available for this range."
+      : severityDescription(affected, computed),
     affectedSessions: affected,
     totalSessions: computed,
     drivers,
-    trend: scoreTrend(signals.trend),
+    trendLabel: "Score-pressure proxy",
+    trend: scorePressureTrend(signals.trend),
     examples: topAgentExamples(signals),
+    examplesLabel: "Comparison groups",
     action: "Add explicit constraints, acceptance criteria, and verification language to task prompts.",
   };
 }
@@ -232,11 +246,14 @@ function contextHealthPattern(
     summary:
       "Compactions, mid-task context loss, and high context pressure.",
     severity: severityFromRatio(affected, total),
+    severityDescription: severityDescription(affected, total),
     affectedSessions: affected,
     totalSessions: total,
     drivers,
-    trend: scoreTrend(signals.trend),
+    trendLabel: "Score-pressure proxy",
+    trend: scorePressureTrend(signals.trend),
     examples: topProjectExamples(signals),
+    examplesLabel: "Comparison groups",
     action: "Split or summarize work before context pressure and mid-task compactions accumulate.",
   };
 }
@@ -256,6 +273,7 @@ function workflowHygienePattern(
     summary:
       "Errored and abandoned sessions, derived from termination outcome signals.",
     severity: severityFromRatio(affected, total),
+    severityDescription: severityDescription(affected, total),
     affectedSessions: affected,
     totalSessions: total,
     drivers: [
@@ -280,10 +298,13 @@ function workflowHygienePattern(
     ],
     trend: signals.trend.map((t) => ({
       date: t.date,
-      affected: t.errored + t.abandoned,
+      value: t.errored + t.abandoned,
+      label: "errored or abandoned sessions",
       score: t.avg_health_score,
     })),
+    trendLabel: "Interrupted sessions",
     examples: topAgentExamples(signals),
+    examplesLabel: "Comparison groups",
     action: "Review errored and abandoned workflows before tuning less severe prompt signals.",
   };
 }
@@ -300,6 +321,7 @@ function toolReliabilityPattern(
     summary:
       "Tool failures, retries, and edit churn counted directly from session tool events.",
     severity: severityFromRatio(h.sessions_with_failures, total),
+    severityDescription: severityDescription(h.sessions_with_failures, total),
     affectedSessions: h.sessions_with_failures,
     totalSessions: total,
     drivers: [
@@ -324,10 +346,13 @@ function toolReliabilityPattern(
     ],
     trend: signals.trend.map((t) => ({
       date: t.date,
-      affected: Math.round(t.avg_failure_signals),
+      value: t.avg_failure_signals,
+      label: "average failure signals",
       score: t.avg_health_score,
     })),
+    trendLabel: "Average failure signals",
     examples: topProjectExamples(signals),
+    examplesLabel: "Comparison groups",
     action: "Inspect sessions with repeated failures or retries and fix brittle tool-use paths.",
   };
 }
@@ -364,18 +389,36 @@ function severityFromRatio(
   if (total <= 0) return "unavailable";
   const ratio = affected / total;
   if (ratio === 0) return "clear";
-  if (ratio >= 0.35) return "critical";
-  if (ratio >= 0.18) return "warning";
+  if (ratio >= QUALITY_PATTERN_SEVERITY_THRESHOLDS.criticalRatio) {
+    return "critical";
+  }
+  if (ratio >= QUALITY_PATTERN_SEVERITY_THRESHOLDS.warningRatio) {
+    return "warning";
+  }
   return "watch";
 }
 
-function scoreTrend(trend: SignalsTrendBucket[]) {
+function severityDescription(affected: number, total: number): string {
+  if (total <= 0) return "No computed sessions for this pattern.";
+  const ratio = affected / total;
+  if (ratio === 0) return "No sessions currently fire this pattern.";
+  if (ratio >= QUALITY_PATTERN_SEVERITY_THRESHOLDS.criticalRatio) {
+    return "Critical means at least 35% of computed sessions fire the pattern.";
+  }
+  if (ratio >= QUALITY_PATTERN_SEVERITY_THRESHOLDS.warningRatio) {
+    return "Warning means at least 18% of computed sessions fire the pattern.";
+  }
+  return "Watch means the pattern is present but below the warning threshold.";
+}
+
+function scorePressureTrend(trend: SignalsTrendBucket[]) {
   return trend.map((t) => ({
     date: t.date,
-    affected:
+    value:
       t.avg_health_score == null
         ? 0
         : Math.max(0, Math.round(100 - t.avg_health_score)),
+    label: "points below 100 average score",
     score: t.avg_health_score,
   }));
 }
