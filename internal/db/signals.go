@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-const signalsBackfillMarker = "session_signals_v1"
+const signalsBackfillMarker = "session_signals_v2"
 
 // SessionSignalUpdate holds computed signal values to persist
 // on the sessions table.

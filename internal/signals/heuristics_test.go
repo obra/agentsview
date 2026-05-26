@@ -1,0 +1,236 @@
+package signals
+
+import "testing"
+
+func TestAnalyzeHeuristics_PromptQuality(t *testing.T) {
+	tests := []struct {
+		name string
+		in   HeuristicInput
+		want HeuristicSignals
+	}{
+		{
+			name: "ignores short control prompts",
+			in: HeuristicInput{Messages: []HeuristicMessage{
+				{Role: "user", Content: "yes"},
+				{Role: "user", Content: "continue"},
+			}},
+			want: HeuristicSignals{},
+		},
+		{
+			name: "counts short substantive prompts",
+			in: HeuristicInput{Messages: []HeuristicMessage{
+				{Role: "user", Content: "fix bug"},
+				{Role: "user", Content: "add tests"},
+			}},
+			want: HeuristicSignals{
+				ShortPromptCount:            2,
+				UnstructuredStart:           true,
+				MissingSuccessCriteriaCount: 1,
+				NoCodeContextCount:          1,
+			},
+		},
+		{
+			name: "structured first prompt avoids start penalty",
+			in: HeuristicInput{Messages: []HeuristicMessage{
+				{
+					Role: "user",
+					Content: "Fix internal/signals/score.go\n\n" +
+						"- Must preserve existing grades\n" +
+						"- Run go test ./internal/signals\n" +
+						"Expected result: tests pass",
+				},
+			}},
+			want: HeuristicSignals{},
+		},
+		{
+			name: "code task missing verification language",
+			in: HeuristicInput{Messages: []HeuristicMessage{
+				{
+					Role: "user",
+					Content: "Implement the backend scorer in the " +
+						"codebase. Success means the score changes " +
+						"only for repeated prompts.",
+				},
+			}},
+			want: HeuristicSignals{
+				MissingVerificationCount: 1,
+				NoCodeContextCount:       1,
+			},
+		},
+		{
+			name: "non code conversation is not penalized",
+			in: HeuristicInput{Messages: []HeuristicMessage{
+				{
+					Role: "user",
+					Content: "What are useful ways to think about " +
+						"technical debt in a planning meeting?",
+				},
+			}},
+			want: HeuristicSignals{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AnalyzeHeuristics(tt.in)
+			if got != tt.want {
+				t.Fatalf("AnalyzeHeuristics() = %+v, want %+v",
+					got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnalyzeHeuristics_RepeatedPrompts(t *testing.T) {
+	in := HeuristicInput{Messages: []HeuristicMessage{
+		{
+			Role: "user",
+			Content: "Please fix the failing tests in the backend " +
+				"scorer and keep the changes small.",
+		},
+		{
+			Role:    "assistant",
+			Content: "I'll inspect the scorer.",
+		},
+		{
+			Role: "user",
+			Content: "Please fix failing backend scorer tests and " +
+				"keep the changes small.",
+		},
+		{
+			Role:    "user",
+			Content: "yes",
+		},
+	}}
+
+	got := AnalyzeHeuristics(in)
+	if got.DuplicatePromptCount != 1 {
+		t.Fatalf("DuplicatePromptCount = %d, want 1",
+			got.DuplicatePromptCount)
+	}
+}
+
+func TestAnalyzeHeuristics_CodeContext(t *testing.T) {
+	tests := []struct {
+		name string
+		in   HeuristicInput
+		want int
+	}{
+		{
+			name: "code task without prompt or tool context",
+			in: HeuristicInput{Messages: []HeuristicMessage{
+				{
+					Role: "user",
+					Content: "Fix the backend test failure in the " +
+						"codebase.",
+				},
+			}},
+			want: 1,
+		},
+		{
+			name: "file reference is context",
+			in: HeuristicInput{Messages: []HeuristicMessage{
+				{
+					Role: "user",
+					Content: "Fix the backend test failure in " +
+						"internal/signals/score.go.",
+				},
+			}},
+			want: 0,
+		},
+		{
+			name: "read tool activity is context",
+			in: HeuristicInput{
+				Messages: []HeuristicMessage{
+					{
+						Role: "user",
+						Content: "Fix the backend test failure in " +
+							"the codebase.",
+					},
+				},
+				ToolRows: []ToolCallRow{
+					{Category: "Search", ToolName: "Grep"},
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "test command is context",
+			in: HeuristicInput{
+				Messages: []HeuristicMessage{
+					{
+						Role: "user",
+						Content: "Fix the backend test failure in " +
+							"the codebase.",
+					},
+				},
+				ToolRows: []ToolCallRow{
+					{
+						Category:  "Bash",
+						ToolName:  "Bash",
+						InputJSON: `{"command":"go test ./internal/signals"}`,
+					},
+				},
+			},
+			want: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AnalyzeHeuristics(tt.in)
+			if got.NoCodeContextCount != tt.want {
+				t.Fatalf("NoCodeContextCount = %d, want %d",
+					got.NoCodeContextCount, tt.want)
+			}
+		})
+	}
+}
+
+func TestAnalyzeHeuristics_RunawayToolLoop(t *testing.T) {
+	t.Run("repeated exact calls", func(t *testing.T) {
+		calls := make([]ToolCallRow, 12)
+		for i := range calls {
+			calls[i] = ToolCallRow{
+				Category:  "Bash",
+				ToolName:  "Bash",
+				InputJSON: `{"command":"npm test"}`,
+			}
+		}
+		got := AnalyzeHeuristics(HeuristicInput{ToolRows: calls})
+		if got.RunawayToolLoopCount != 1 {
+			t.Fatalf("RunawayToolLoopCount = %d, want 1",
+				got.RunawayToolLoopCount)
+		}
+	})
+
+	t.Run("ordinary varied calls", func(t *testing.T) {
+		calls := []ToolCallRow{
+			{Category: "Read", ToolName: "Read", InputJSON: `{"file_path":"a.go"}`},
+			{Category: "Search", ToolName: "Grep", InputJSON: `{"pattern":"x"}`},
+			{Category: "Edit", ToolName: "Edit", InputJSON: `{"file_path":"a.go"}`},
+			{Category: "Bash", ToolName: "Bash", InputJSON: `{"command":"go test ./..."}`},
+			{Category: "Read", ToolName: "Read", InputJSON: `{"file_path":"b.go"}`},
+			{Category: "Edit", ToolName: "Edit", InputJSON: `{"file_path":"b.go"}`},
+			{Category: "Search", ToolName: "Grep", InputJSON: `{"pattern":"y"}`},
+			{Category: "Bash", ToolName: "Bash", InputJSON: `{"command":"go test ./internal/db"}`},
+			{Category: "Read", ToolName: "Read", InputJSON: `{"file_path":"c.go"}`},
+			{Category: "Edit", ToolName: "Edit", InputJSON: `{"file_path":"c.go"}`},
+			{Category: "Search", ToolName: "Grep", InputJSON: `{"pattern":"z"}`},
+			{Category: "Bash", ToolName: "Bash", InputJSON: `{"command":"go test ./internal/signals"}`},
+		}
+		got := AnalyzeHeuristics(HeuristicInput{ToolRows: calls})
+		if got.RunawayToolLoopCount != 0 {
+			t.Fatalf("RunawayToolLoopCount = %d, want 0",
+				got.RunawayToolLoopCount)
+		}
+	})
+}
+
+func TestNormalizePromptRemovesCodeFences(t *testing.T) {
+	got := normalizePrompt("Fix this:\n```go\nfunc main() {}\n```\nPlease")
+	want := "fix this: please"
+	if got != want {
+		t.Fatalf("normalizePrompt() = %q, want %q", got, want)
+	}
+}

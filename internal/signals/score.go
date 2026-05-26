@@ -15,6 +15,7 @@ type ScoreInput struct {
 	CompactionCount        int
 	MidTaskCompactionCount int
 	PressureMax            *float64
+	Heuristics             HeuristicSignals
 }
 
 // ScoreResult holds the computed health score and its breakdown.
@@ -66,6 +67,15 @@ func buildBasis(in ScoreInput) []string {
 	if in.HasContextData {
 		basis = append(basis, "context_pressure")
 	}
+	if hasPromptQualitySignals(in.Heuristics) {
+		basis = append(basis, "prompt_quality")
+	}
+	if in.Heuristics.NoCodeContextCount > 0 {
+		basis = append(basis, "context_quality")
+	}
+	if in.Heuristics.RunawayToolLoopCount > 0 {
+		basis = append(basis, "workflow_quality")
+	}
 	return basis
 }
 
@@ -85,8 +95,17 @@ func computePenalties(in ScoreInput) map[string]int {
 	applyOutcomePenalty(in.Outcome, penalties)
 	applyToolPenalties(in, penalties)
 	applyContextPenalties(in, penalties)
+	applyHeuristicPenalties(in.Heuristics, penalties)
 
 	return penalties
+}
+
+func hasPromptQualitySignals(s HeuristicSignals) bool {
+	return s.ShortPromptCount > 0 ||
+		s.UnstructuredStart ||
+		s.MissingSuccessCriteriaCount > 0 ||
+		s.MissingVerificationCount > 0 ||
+		s.DuplicatePromptCount > 0
 }
 
 func applyOutcomePenalty(
@@ -141,6 +160,33 @@ func applyContextPenalties(
 	}
 	if in.PressureMax != nil && *in.PressureMax > 0.9 {
 		penalties["context_pressure_high"] = 10
+	}
+}
+
+func applyHeuristicPenalties(
+	s HeuristicSignals,
+	penalties map[string]int,
+) {
+	if p := capPenalty(s.ShortPromptCount, 3); p > 0 {
+		penalties["short_prompts"] = p
+	}
+	if s.UnstructuredStart {
+		penalties["constraintless_first_prompt"] = 2
+	}
+	if s.MissingSuccessCriteriaCount > 0 {
+		penalties["missing_success_criteria"] = 2
+	}
+	if s.MissingVerificationCount > 0 {
+		penalties["missing_verification_language"] = 1
+	}
+	if p := capPenalty(s.DuplicatePromptCount*2, 4); p > 0 {
+		penalties["repeated_prompts"] = p
+	}
+	if s.NoCodeContextCount > 0 {
+		penalties["code_task_without_context"] = 4
+	}
+	if p := capPenalty(s.RunawayToolLoopCount*5, 5); p > 0 {
+		penalties["runaway_loop"] = p
 	}
 }
 

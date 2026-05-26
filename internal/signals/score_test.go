@@ -319,6 +319,38 @@ func TestComputeHealthScore(t *testing.T) {
 				"compactions": 15,
 			},
 		},
+		{
+			name: "heuristic penalties are conservative and capped",
+			input: ScoreInput{
+				Outcome:           "completed",
+				OutcomeConfidence: "high",
+				HasToolCalls:      true,
+				Heuristics: HeuristicSignals{
+					ShortPromptCount:            10,
+					UnstructuredStart:           true,
+					MissingSuccessCriteriaCount: 2,
+					MissingVerificationCount:    2,
+					DuplicatePromptCount:        10,
+					NoCodeContextCount:          1,
+					RunawayToolLoopCount:        3,
+				},
+			},
+			wantScore: new(79),
+			wantGrade: "B",
+			wantBasis: []string{
+				"outcome", "tool_health", "prompt_quality",
+				"context_quality", "workflow_quality",
+			},
+			wantPenalties: map[string]int{
+				"short_prompts":                 3,
+				"constraintless_first_prompt":   2,
+				"missing_success_criteria":      2,
+				"missing_verification_language": 1,
+				"repeated_prompts":              4,
+				"code_task_without_context":     4,
+				"runaway_loop":                  5,
+			},
+		},
 	}
 
 	for _, tt := range tests {

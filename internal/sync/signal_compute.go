@@ -19,6 +19,10 @@ func computeSignalsFromMessages(
 	sess db.Session, msgs []db.Message,
 ) db.SessionSignalUpdate {
 	toolRows := extractToolCallRows(msgs)
+	heuristics := signals.AnalyzeHeuristics(signals.HeuristicInput{
+		Messages: extractHeuristicMessages(msgs),
+		ToolRows: toolRows,
+	})
 	ctxTokens := extractContextTokens(msgs)
 	boundaries := extractCompactBoundaryOrdinals(msgs)
 	model := extractMostCommonModel(msgs)
@@ -91,6 +95,7 @@ func computeSignalsFromMessages(
 		CompactionCount:        compactionCount,
 		MidTaskCompactionCount: midTaskCount,
 		PressureMax:            ctxPressure.PressureMax,
+		Heuristics:             heuristics,
 	})
 
 	var pendingSince *string
@@ -122,6 +127,21 @@ func computeSignalsFromMessages(
 		HasToolCalls:           len(toolRows) > 0,
 		HasContextData:         hasContextData,
 	}
+}
+
+func extractHeuristicMessages(
+	msgs []db.Message,
+) []signals.HeuristicMessage {
+	rows := make([]signals.HeuristicMessage, 0, len(msgs))
+	for _, m := range msgs {
+		rows = append(rows, signals.HeuristicMessage{
+			Role:     m.Role,
+			Content:  m.Content,
+			IsSystem: m.IsSystem,
+			Ordinal:  m.Ordinal,
+		})
+	}
+	return rows
 }
 
 // extractToolCallRows builds signal inputs from in-memory tool
