@@ -226,6 +226,22 @@ export interface SignalsContextHealth {
   high_pressure_sessions: number;
 }
 
+export interface QualitySignalTotals {
+  short_prompt_count: number;
+  unstructured_start: number;
+  missing_success_criteria_count: number;
+  missing_verification_count: number;
+  duplicate_prompt_count: number;
+  no_code_context_count: number;
+  runaway_tool_loop_count: number;
+}
+
+export interface SignalsQualityHealth {
+  computed_sessions: number;
+  totals: QualitySignalTotals;
+  sessions_with_signal: QualitySignalTotals;
+}
+
 export interface SignalsTrendBucket {
   date: string;
   session_count: number;
@@ -263,6 +279,7 @@ export interface SignalsAnalyticsResponse {
   outcome_confidence_distribution: Record<string, number>;
   tool_health: SignalsToolHealth;
   context_health: SignalsContextHealth;
+  quality_health: SignalsQualityHealth;
   trend: SignalsTrendBucket[];
   by_agent: SignalsAgentRow[];
   by_project: SignalsProjectRow[];

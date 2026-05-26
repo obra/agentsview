@@ -46,6 +46,11 @@ const sessionBaseCols = `id, project, machine, agent,
 	health_score, health_grade,
 	has_tool_calls, has_context_data,
 	secret_leak_count, secrets_rules_version,
+	quality_signal_version,
+	short_prompt_count, unstructured_start,
+	missing_success_criteria_count,
+	missing_verification_count, duplicate_prompt_count,
+	no_code_context_count, runaway_tool_loop_count,
 	data_version,
 	cwd, git_branch, source_session_id, source_version,
 	parser_malformed_lines, is_truncated,
@@ -70,6 +75,11 @@ const sessionPruneCols = `id, project, machine, agent,
 	health_score, health_grade,
 	has_tool_calls, has_context_data,
 	secret_leak_count, secrets_rules_version,
+	quality_signal_version,
+	short_prompt_count, unstructured_start,
+	missing_success_criteria_count,
+	missing_verification_count, duplicate_prompt_count,
+	no_code_context_count, runaway_tool_loop_count,
 	data_version,
 	cwd, git_branch, source_session_id, source_version,
 	parser_malformed_lines, is_truncated,
@@ -93,6 +103,11 @@ const sessionFullCols = `id, project, machine, agent,
 	health_score, health_grade,
 	has_tool_calls, has_context_data,
 	secret_leak_count, secrets_rules_version,
+	quality_signal_version,
+	short_prompt_count, unstructured_start,
+	missing_success_criteria_count,
+	missing_verification_count, duplicate_prompt_count,
+	no_code_context_count, runaway_tool_loop_count,
 	data_version,
 	cwd, git_branch, source_session_id, source_version,
 	parser_malformed_lines, is_truncated,
@@ -134,6 +149,11 @@ func scanSessionRow(rs rowScanner) (Session, error) {
 		&s.HealthScore, &s.HealthGrade,
 		&s.HasToolCalls, &s.HasContextData,
 		&s.SecretLeakCount, &s.SecretsRulesVersion,
+		&s.QualitySignalVersion,
+		&s.ShortPromptCount, &s.UnstructuredStart,
+		&s.MissingSuccessCriteriaCount,
+		&s.MissingVerificationCount, &s.DuplicatePromptCount,
+		&s.NoCodeContextCount, &s.RunawayToolLoopCount,
 		&s.DataVersion,
 		&s.Cwd, &s.GitBranch,
 		&s.SourceSessionID, &s.SourceVersion,
@@ -141,6 +161,54 @@ func scanSessionRow(rs rowScanner) (Session, error) {
 		&s.DeletedAt, &s.TerminationStatus, &s.CreatedAt,
 	)
 	return s, err
+}
+
+const CurrentQualitySignalVersion = 1
+
+// QualitySignals groups persisted deterministic quality-signal
+// columns for API callers while keeping the database representation
+// scalar and aggregation-friendly.
+type QualitySignals struct {
+	Version                     int  `json:"version"`
+	ShortPromptCount            int  `json:"short_prompt_count"`
+	UnstructuredStart           bool `json:"unstructured_start"`
+	MissingSuccessCriteriaCount int  `json:"missing_success_criteria_count"`
+	MissingVerificationCount    int  `json:"missing_verification_count"`
+	DuplicatePromptCount        int  `json:"duplicate_prompt_count"`
+	NoCodeContextCount          int  `json:"no_code_context_count"`
+	RunawayToolLoopCount        int  `json:"runaway_tool_loop_count"`
+}
+
+// StoredQualitySignals returns the grouped API view of persisted
+// deterministic quality-signal columns. Version 0 means the row has
+// not gone through the Phase 3 signal write/backfill path yet.
+func (s Session) StoredQualitySignals() *QualitySignals {
+	if s.QualitySignalVersion <= 0 {
+		return nil
+	}
+	return &QualitySignals{
+		Version:                     s.QualitySignalVersion,
+		ShortPromptCount:            s.ShortPromptCount,
+		UnstructuredStart:           s.UnstructuredStart,
+		MissingSuccessCriteriaCount: s.MissingSuccessCriteriaCount,
+		MissingVerificationCount:    s.MissingVerificationCount,
+		DuplicatePromptCount:        s.DuplicatePromptCount,
+		NoCodeContextCount:          s.NoCodeContextCount,
+		RunawayToolLoopCount:        s.RunawayToolLoopCount,
+	}
+}
+
+// MarshalJSON exposes quality signals as a grouped optional object
+// without leaking the scalar persistence columns into the API.
+func (s Session) MarshalJSON() ([]byte, error) {
+	type sessionAlias Session
+	return json.Marshal(struct {
+		sessionAlias
+		QualitySignals *QualitySignals `json:"quality_signals,omitempty"`
+	}{
+		sessionAlias:   sessionAlias(s),
+		QualitySignals: s.StoredQualitySignals(),
+	})
 }
 
 // Session represents a row in the sessions table.
@@ -165,31 +233,39 @@ type Session struct {
 	IsAutomated          bool    `json:"is_automated"`
 
 	// Session signals (computed from messages/tool_calls).
-	ToolFailureSignalCount int      `json:"tool_failure_signal_count"`
-	ToolRetryCount         int      `json:"tool_retry_count"`
-	EditChurnCount         int      `json:"edit_churn_count"`
-	ConsecutiveFailureMax  int      `json:"consecutive_failure_max"`
-	Outcome                string   `json:"outcome"`
-	OutcomeConfidence      string   `json:"outcome_confidence"`
-	EndedWithRole          string   `json:"ended_with_role"`
-	FinalFailureStreak     int      `json:"final_failure_streak"`
-	SignalsPendingSince    *string  `json:"signals_pending_since,omitempty"`
-	CompactionCount        int      `json:"compaction_count"`
-	MidTaskCompactionCount int      `json:"mid_task_compaction_count"`
-	ContextPressureMax     *float64 `json:"context_pressure_max,omitempty"`
-	HealthScore            *int     `json:"health_score,omitempty"`
-	HealthGrade            *string  `json:"health_grade,omitempty"`
-	HasToolCalls           bool     `json:"-"`
-	HasContextData         bool     `json:"-"`
-	SecretLeakCount        int      `json:"secret_leak_count"`
-	SecretsRulesVersion    string   `json:"-"`
-	DataVersion            int      `json:"-"`
-	Cwd                    string   `json:"cwd,omitempty"`
-	GitBranch              string   `json:"git_branch,omitempty"`
-	SourceSessionID        string   `json:"source_session_id,omitempty"`
-	SourceVersion          string   `json:"source_version,omitempty"`
-	ParserMalformedLines   int      `json:"parser_malformed_lines,omitempty"`
-	IsTruncated            bool     `json:"is_truncated,omitempty"`
+	ToolFailureSignalCount      int      `json:"tool_failure_signal_count"`
+	ToolRetryCount              int      `json:"tool_retry_count"`
+	EditChurnCount              int      `json:"edit_churn_count"`
+	ConsecutiveFailureMax       int      `json:"consecutive_failure_max"`
+	Outcome                     string   `json:"outcome"`
+	OutcomeConfidence           string   `json:"outcome_confidence"`
+	EndedWithRole               string   `json:"ended_with_role"`
+	FinalFailureStreak          int      `json:"final_failure_streak"`
+	SignalsPendingSince         *string  `json:"signals_pending_since,omitempty"`
+	CompactionCount             int      `json:"compaction_count"`
+	MidTaskCompactionCount      int      `json:"mid_task_compaction_count"`
+	ContextPressureMax          *float64 `json:"context_pressure_max,omitempty"`
+	HealthScore                 *int     `json:"health_score,omitempty"`
+	HealthGrade                 *string  `json:"health_grade,omitempty"`
+	HasToolCalls                bool     `json:"-"`
+	HasContextData              bool     `json:"-"`
+	SecretLeakCount             int      `json:"secret_leak_count"`
+	SecretsRulesVersion         string   `json:"-"`
+	QualitySignalVersion        int      `json:"-"`
+	ShortPromptCount            int      `json:"-"`
+	UnstructuredStart           bool     `json:"-"`
+	MissingSuccessCriteriaCount int      `json:"-"`
+	MissingVerificationCount    int      `json:"-"`
+	DuplicatePromptCount        int      `json:"-"`
+	NoCodeContextCount          int      `json:"-"`
+	RunawayToolLoopCount        int      `json:"-"`
+	DataVersion                 int      `json:"-"`
+	Cwd                         string   `json:"cwd,omitempty"`
+	GitBranch                   string   `json:"git_branch,omitempty"`
+	SourceSessionID             string   `json:"source_session_id,omitempty"`
+	SourceVersion               string   `json:"source_version,omitempty"`
+	ParserMalformedLines        int      `json:"parser_malformed_lines,omitempty"`
+	IsTruncated                 bool     `json:"is_truncated,omitempty"`
 
 	DeletedAt         *string `json:"deleted_at,omitempty"`
 	TerminationStatus *string `json:"termination_status,omitempty"`
@@ -864,6 +940,11 @@ func (db *DB) GetSessionFull(
 		&s.HealthScore, &s.HealthGrade,
 		&s.HasToolCalls, &s.HasContextData,
 		&s.SecretLeakCount, &s.SecretsRulesVersion,
+		&s.QualitySignalVersion,
+		&s.ShortPromptCount, &s.UnstructuredStart,
+		&s.MissingSuccessCriteriaCount,
+		&s.MissingVerificationCount, &s.DuplicatePromptCount,
+		&s.NoCodeContextCount, &s.RunawayToolLoopCount,
 		&s.DataVersion,
 		&s.Cwd, &s.GitBranch,
 		&s.SourceSessionID, &s.SourceVersion,
@@ -2028,6 +2109,11 @@ func (db *DB) FindPruneCandidates(
 			&s.HealthScore, &s.HealthGrade,
 			&s.HasToolCalls, &s.HasContextData,
 			&s.SecretLeakCount, &s.SecretsRulesVersion,
+			&s.QualitySignalVersion,
+			&s.ShortPromptCount, &s.UnstructuredStart,
+			&s.MissingSuccessCriteriaCount,
+			&s.MissingVerificationCount, &s.DuplicatePromptCount,
+			&s.NoCodeContextCount, &s.RunawayToolLoopCount,
 			&s.DataVersion,
 			&s.Cwd, &s.GitBranch,
 			&s.SourceSessionID, &s.SourceVersion,
@@ -2331,6 +2417,11 @@ func (db *DB) ListSessionsModifiedBetween(
 			&s.HealthScore, &s.HealthGrade,
 			&s.HasToolCalls, &s.HasContextData,
 			&s.SecretLeakCount, &s.SecretsRulesVersion,
+			&s.QualitySignalVersion,
+			&s.ShortPromptCount, &s.UnstructuredStart,
+			&s.MissingSuccessCriteriaCount,
+			&s.MissingVerificationCount, &s.DuplicatePromptCount,
+			&s.NoCodeContextCount, &s.RunawayToolLoopCount,
 			&s.DataVersion,
 			&s.Cwd, &s.GitBranch,
 			&s.SourceSessionID, &s.SourceVersion,

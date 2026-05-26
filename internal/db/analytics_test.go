@@ -2339,6 +2339,13 @@ func TestGetAnalyticsSignals(t *testing.T) {
 		ToolRetryCount:         1,
 		CompactionCount:        1,
 		ContextPressureMax:     &cp1,
+		QualitySignals: QualitySignals{
+			Version:                     CurrentQualitySignalVersion,
+			ShortPromptCount:            2,
+			UnstructuredStart:           true,
+			MissingSuccessCriteriaCount: 1,
+			DuplicatePromptCount:        1,
+		},
 	})
 	insertSession(t, d, "sig2", "alpha", func(s *Session) {
 		s.StartedAt = new("2024-06-01T14:00:00Z")
@@ -2355,6 +2362,12 @@ func TestGetAnalyticsSignals(t *testing.T) {
 		ToolRetryCount:         3,
 		EditChurnCount:         2,
 		ContextPressureMax:     &cp2,
+		QualitySignals: QualitySignals{
+			Version:                  CurrentQualitySignalVersion,
+			MissingVerificationCount: 1,
+			NoCodeContextCount:       1,
+			RunawayToolLoopCount:     1,
+		},
 	})
 	insertSession(t, d, "sig3", "beta", func(s *Session) {
 		s.StartedAt = new("2024-06-02T10:00:00Z")
@@ -2390,6 +2403,31 @@ func TestGetAnalyticsSignals(t *testing.T) {
 		// (85 + 45) / 2 = 65.0
 		assertEq(t, "AvgHealthScore",
 			*resp.AvgHealthScore, 65.0)
+	})
+
+	t.Run("QualityHealth", func(t *testing.T) {
+		resp, err := d.GetAnalyticsSignals(ctx, baseFilter())
+		if err != nil {
+			t.Fatalf("GetAnalyticsSignals: %v", err)
+		}
+		assertEq(t, "ComputedSessions",
+			resp.QualityHealth.ComputedSessions, 2)
+		assertEq(t, "ShortPromptCount total",
+			resp.QualityHealth.Totals.ShortPromptCount, 2)
+		assertEq(t, "ShortPromptCount sessions",
+			resp.QualityHealth.SessionsWithSignal.ShortPromptCount, 1)
+		assertEq(t, "UnstructuredStart total",
+			resp.QualityHealth.Totals.UnstructuredStart, 1)
+		assertEq(t, "MissingSuccessCriteriaCount total",
+			resp.QualityHealth.Totals.MissingSuccessCriteriaCount, 1)
+		assertEq(t, "MissingVerificationCount total",
+			resp.QualityHealth.Totals.MissingVerificationCount, 1)
+		assertEq(t, "DuplicatePromptCount total",
+			resp.QualityHealth.Totals.DuplicatePromptCount, 1)
+		assertEq(t, "NoCodeContextCount total",
+			resp.QualityHealth.Totals.NoCodeContextCount, 1)
+		assertEq(t, "RunawayToolLoopCount total",
+			resp.QualityHealth.Totals.RunawayToolLoopCount, 1)
 	})
 
 	t.Run("OutcomeDistribution", func(t *testing.T) {

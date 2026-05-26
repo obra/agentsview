@@ -729,6 +729,38 @@ func (db *DB) migrateColumns() error {
 			"ALTER TABLE sessions ADD COLUMN has_context_data INTEGER NOT NULL DEFAULT 0",
 		},
 		{
+			"sessions", "quality_signal_version",
+			"ALTER TABLE sessions ADD COLUMN quality_signal_version INTEGER NOT NULL DEFAULT 0",
+		},
+		{
+			"sessions", "short_prompt_count",
+			"ALTER TABLE sessions ADD COLUMN short_prompt_count INTEGER NOT NULL DEFAULT 0",
+		},
+		{
+			"sessions", "unstructured_start",
+			"ALTER TABLE sessions ADD COLUMN unstructured_start INTEGER NOT NULL DEFAULT 0",
+		},
+		{
+			"sessions", "missing_success_criteria_count",
+			"ALTER TABLE sessions ADD COLUMN missing_success_criteria_count INTEGER NOT NULL DEFAULT 0",
+		},
+		{
+			"sessions", "missing_verification_count",
+			"ALTER TABLE sessions ADD COLUMN missing_verification_count INTEGER NOT NULL DEFAULT 0",
+		},
+		{
+			"sessions", "duplicate_prompt_count",
+			"ALTER TABLE sessions ADD COLUMN duplicate_prompt_count INTEGER NOT NULL DEFAULT 0",
+		},
+		{
+			"sessions", "no_code_context_count",
+			"ALTER TABLE sessions ADD COLUMN no_code_context_count INTEGER NOT NULL DEFAULT 0",
+		},
+		{
+			"sessions", "runaway_tool_loop_count",
+			"ALTER TABLE sessions ADD COLUMN runaway_tool_loop_count INTEGER NOT NULL DEFAULT 0",
+		},
+		{
 			"sessions", "data_version",
 			"ALTER TABLE sessions ADD COLUMN data_version INTEGER NOT NULL DEFAULT 0",
 		},

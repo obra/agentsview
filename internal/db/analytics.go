@@ -2852,6 +2852,7 @@ type SignalsAnalyticsResponse struct {
 	OutcomeConfidenceDistribution map[string]int       `json:"outcome_confidence_distribution"`
 	ToolHealth                    SignalsToolHealth    `json:"tool_health"`
 	ContextHealth                 SignalsContextHealth `json:"context_health"`
+	QualityHealth                 SignalsQualityHealth `json:"quality_health"`
 	Trend                         []SignalsTrendBucket `json:"trend"`
 	ByAgent                       []SignalsAgentRow    `json:"by_agent"`
 	ByProject                     []SignalsProjectRow  `json:"by_project"`
@@ -2875,6 +2876,26 @@ type SignalsContextHealth struct {
 	SessionsWithContextData   int      `json:"sessions_with_context_data"`
 	AvgContextPressure        *float64 `json:"avg_context_pressure"`
 	HighPressureSessions      int      `json:"high_pressure_sessions"`
+}
+
+// SignalsQualityHealth holds aggregate deterministic quality-signal
+// metrics. Totals are raw signal sums; SessionsWithSignal counts
+// sessions where each signal was non-zero.
+type SignalsQualityHealth struct {
+	ComputedSessions   int                 `json:"computed_sessions"`
+	Totals             QualitySignalTotals `json:"totals"`
+	SessionsWithSignal QualitySignalTotals `json:"sessions_with_signal"`
+}
+
+// QualitySignalTotals is shared by aggregate quality-signal totals.
+type QualitySignalTotals struct {
+	ShortPromptCount            int `json:"short_prompt_count"`
+	UnstructuredStart           int `json:"unstructured_start"`
+	MissingSuccessCriteriaCount int `json:"missing_success_criteria_count"`
+	MissingVerificationCount    int `json:"missing_verification_count"`
+	DuplicatePromptCount        int `json:"duplicate_prompt_count"`
+	NoCodeContextCount          int `json:"no_code_context_count"`
+	RunawayToolLoopCount        int `json:"runaway_tool_loop_count"`
 }
 
 // SignalsTrendBucket holds signal data for one date bucket.
@@ -2911,20 +2932,28 @@ type SignalsProjectRow struct {
 // from its own SELECT and feed them into AggregateSignals
 // without duplicating the aggregation logic.
 type SignalRow struct {
-	ID                     string
-	Agent                  string
-	Project                string
-	Date                   string
-	HealthScore            *int
-	HealthGrade            *string
-	Outcome                string
-	OutcomeConfidence      string
-	ToolFailureSignalCount int
-	ToolRetryCount         int
-	EditChurnCount         int
-	CompactionCount        int
-	MidTaskCompactionCount int
-	ContextPressureMax     *float64
+	ID                          string
+	Agent                       string
+	Project                     string
+	Date                        string
+	HealthScore                 *int
+	HealthGrade                 *string
+	Outcome                     string
+	OutcomeConfidence           string
+	ToolFailureSignalCount      int
+	ToolRetryCount              int
+	EditChurnCount              int
+	CompactionCount             int
+	MidTaskCompactionCount      int
+	ContextPressureMax          *float64
+	QualitySignalVersion        int
+	ShortPromptCount            int
+	UnstructuredStart           bool
+	MissingSuccessCriteriaCount int
+	MissingVerificationCount    int
+	DuplicatePromptCount        int
+	NoCodeContextCount          int
+	RunawayToolLoopCount        int
 }
 
 // GetAnalyticsSignals returns aggregated session signal data.
@@ -2951,7 +2980,12 @@ func (db *DB) GetAnalyticsSignals(
 		tool_failure_signal_count, tool_retry_count,
 		edit_churn_count, compaction_count,
 		mid_task_compaction_count,
-		context_pressure_max
+		context_pressure_max,
+		quality_signal_version,
+		short_prompt_count, unstructured_start,
+		missing_success_criteria_count,
+		missing_verification_count, duplicate_prompt_count,
+		no_code_context_count, runaway_tool_loop_count
 		FROM sessions WHERE ` + where
 
 	rows, err := db.getReader().QueryContext(
@@ -2977,6 +3011,12 @@ func (db *DB) GetAnalyticsSignals(
 			&r.ToolRetryCount, &r.EditChurnCount,
 			&r.CompactionCount, &r.MidTaskCompactionCount,
 			&r.ContextPressureMax,
+			&r.QualitySignalVersion,
+			&r.ShortPromptCount, &r.UnstructuredStart,
+			&r.MissingSuccessCriteriaCount,
+			&r.MissingVerificationCount,
+			&r.DuplicatePromptCount,
+			&r.NoCodeContextCount, &r.RunawayToolLoopCount,
 		); err != nil {
 			return SignalsAnalyticsResponse{},
 				fmt.Errorf(
@@ -3093,6 +3133,8 @@ func AggregateSignals(
 				resp.ContextHealth.HighPressureSessions++
 			}
 		}
+
+		accumulateQualityHealth(&resp.QualityHealth, r)
 
 		// Accumulate by agent
 		ga := agentMap[r.Agent]
@@ -3304,6 +3346,44 @@ func AggregateSignals(
 	})
 
 	return resp
+}
+
+func accumulateQualityHealth(
+	q *SignalsQualityHealth, r SignalRow,
+) {
+	if r.QualitySignalVersion <= 0 {
+		return
+	}
+	q.ComputedSessions++
+	q.Totals.ShortPromptCount += r.ShortPromptCount
+	if r.ShortPromptCount > 0 {
+		q.SessionsWithSignal.ShortPromptCount++
+	}
+	if r.UnstructuredStart {
+		q.Totals.UnstructuredStart++
+		q.SessionsWithSignal.UnstructuredStart++
+	}
+	q.Totals.MissingSuccessCriteriaCount +=
+		r.MissingSuccessCriteriaCount
+	if r.MissingSuccessCriteriaCount > 0 {
+		q.SessionsWithSignal.MissingSuccessCriteriaCount++
+	}
+	q.Totals.MissingVerificationCount += r.MissingVerificationCount
+	if r.MissingVerificationCount > 0 {
+		q.SessionsWithSignal.MissingVerificationCount++
+	}
+	q.Totals.DuplicatePromptCount += r.DuplicatePromptCount
+	if r.DuplicatePromptCount > 0 {
+		q.SessionsWithSignal.DuplicatePromptCount++
+	}
+	q.Totals.NoCodeContextCount += r.NoCodeContextCount
+	if r.NoCodeContextCount > 0 {
+		q.SessionsWithSignal.NoCodeContextCount++
+	}
+	q.Totals.RunawayToolLoopCount += r.RunawayToolLoopCount
+	if r.RunawayToolLoopCount > 0 {
+		q.SessionsWithSignal.RunawayToolLoopCount++
+	}
 }
 
 // --- Top Sessions ---

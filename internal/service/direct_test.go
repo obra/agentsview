@@ -85,6 +85,11 @@ func TestDirectBackend_Get_HealthBreakdownIncludesHeuristics(
 			EndedWithRole:     "assistant",
 			HealthScore:       &score,
 			HealthGrade:       &grade,
+			QualitySignals: db.QualitySignals{
+				Version:              db.CurrentQualitySignalVersion,
+				DuplicatePromptCount: 1,
+				NoCodeContextCount:   1,
+			},
 		},
 	)
 	require.NoError(t, err)

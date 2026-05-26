@@ -32,6 +32,16 @@ func TestUpdateSessionSignals(t *testing.T) {
 		ContextPressureMax:     new(0.85),
 		HealthScore:            new(72),
 		HealthGrade:            new("B"),
+		QualitySignals: QualitySignals{
+			Version:                     CurrentQualitySignalVersion,
+			ShortPromptCount:            2,
+			UnstructuredStart:           true,
+			MissingSuccessCriteriaCount: 1,
+			MissingVerificationCount:    1,
+			DuplicatePromptCount:        3,
+			NoCodeContextCount:          1,
+			RunawayToolLoopCount:        1,
+		},
 	}
 	require.NoError(t, d.UpdateSessionSignals("sig-1", update),
 		"UpdateSessionSignals")
@@ -49,6 +59,16 @@ func TestUpdateSessionSignals(t *testing.T) {
 	assert.Equal(t, "assistant", got.EndedWithRole, "EndedWithRole")
 	assert.Equal(t, 0, got.FinalFailureStreak, "FinalFailureStreak")
 	assert.Equal(t, 2, got.CompactionCount, "CompactionCount")
+	assert.Equal(t, 1, got.QualitySignalVersion, "QualitySignalVersion")
+	assert.Equal(t, 2, got.ShortPromptCount, "ShortPromptCount")
+	assert.True(t, got.UnstructuredStart, "UnstructuredStart")
+	assert.Equal(t, 1, got.MissingSuccessCriteriaCount,
+		"MissingSuccessCriteriaCount")
+	assert.Equal(t, 1, got.MissingVerificationCount,
+		"MissingVerificationCount")
+	assert.Equal(t, 3, got.DuplicatePromptCount, "DuplicatePromptCount")
+	assert.Equal(t, 1, got.NoCodeContextCount, "NoCodeContextCount")
+	assert.Equal(t, 1, got.RunawayToolLoopCount, "RunawayToolLoopCount")
 
 	assert.Nil(t, got.SignalsPendingSince, "SignalsPendingSince")
 	require.NotNil(t, got.ContextPressureMax, "ContextPressureMax")
@@ -86,6 +106,7 @@ func TestUpdateSessionSignals(t *testing.T) {
 	assert.Nil(t, got2.ContextPressureMax, "ContextPressureMax")
 	assert.Nil(t, got2.HealthScore, "HealthScore")
 	assert.Nil(t, got2.HealthGrade, "HealthGrade")
+	assert.Nil(t, got2.StoredQualitySignals(), "StoredQualitySignals")
 }
 
 // TestUpdateSessionSignalsBumpsLocalModifiedAt ensures that

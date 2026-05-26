@@ -59,22 +59,14 @@ func (b *directBackend) Get(
 		return nil, err
 	}
 	hideStaleSecretCount(s, secrets.ActiveRulesVersions())
-	var msgs []db.Message
-	if s.HealthScore != nil {
-		msgs, err = b.db.GetAllMessages(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return buildSessionDetail(s, msgs), nil
+	return buildSessionDetail(s), nil
 }
 
 // buildSessionDetail wraps a db.Session with its computed health
 // breakdown. The same shape is returned by GET /api/v1/sessions/{id}.
-func buildSessionDetail(s *db.Session, msgs []db.Message) *SessionDetail {
+func buildSessionDetail(s *db.Session) *SessionDetail {
 	detail := &SessionDetail{Session: *s}
 	if s.HealthScore != nil {
-		toolRows := detailToolRows(msgs)
 		result := signals.ComputeHealthScore(signals.ScoreInput{
 			Outcome:                s.Outcome,
 			OutcomeConfidence:      s.OutcomeConfidence,
@@ -87,11 +79,7 @@ func buildSessionDetail(s *db.Session, msgs []db.Message) *SessionDetail {
 			CompactionCount:        s.CompactionCount,
 			MidTaskCompactionCount: s.MidTaskCompactionCount,
 			PressureMax:            s.ContextPressureMax,
-			Heuristics: signals.AnalyzeHeuristics(
-				signals.HeuristicInput{
-					Messages: detailHeuristicMessages(msgs),
-					ToolRows: toolRows,
-				}),
+			Heuristics:             persistedHeuristics(s),
 		})
 		detail.HealthScoreBasis = result.Basis
 		detail.HealthPenalties = result.Penalties
@@ -99,39 +87,20 @@ func buildSessionDetail(s *db.Session, msgs []db.Message) *SessionDetail {
 	return detail
 }
 
-func detailHeuristicMessages(msgs []db.Message) []signals.HeuristicMessage {
-	rows := make([]signals.HeuristicMessage, 0, len(msgs))
-	for _, m := range msgs {
-		rows = append(rows, signals.HeuristicMessage{
-			Role:     m.Role,
-			Content:  m.Content,
-			IsSystem: m.IsSystem,
-			Ordinal:  m.Ordinal,
-		})
+func persistedHeuristics(s *db.Session) signals.HeuristicSignals {
+	qs := s.StoredQualitySignals()
+	if qs == nil {
+		return signals.HeuristicSignals{}
 	}
-	return rows
-}
-
-func detailToolRows(msgs []db.Message) []signals.ToolCallRow {
-	rows := make([]signals.ToolCallRow, 0)
-	for _, m := range msgs {
-		for callIdx, tc := range m.ToolCalls {
-			status := ""
-			if n := len(tc.ResultEvents); n > 0 {
-				status = tc.ResultEvents[n-1].Status
-			}
-			rows = append(rows, signals.ToolCallRow{
-				ToolName:       tc.ToolName,
-				Category:       tc.Category,
-				InputJSON:      tc.InputJSON,
-				ResultContent:  tc.ResultContent,
-				MessageOrdinal: m.Ordinal,
-				CallIndex:      callIdx,
-				EventStatus:    status,
-			})
-		}
+	return signals.HeuristicSignals{
+		ShortPromptCount:            qs.ShortPromptCount,
+		UnstructuredStart:           qs.UnstructuredStart,
+		MissingSuccessCriteriaCount: qs.MissingSuccessCriteriaCount,
+		MissingVerificationCount:    qs.MissingVerificationCount,
+		DuplicatePromptCount:        qs.DuplicatePromptCount,
+		NoCodeContextCount:          qs.NoCodeContextCount,
+		RunawayToolLoopCount:        qs.RunawayToolLoopCount,
 	}
-	return rows
 }
 
 func (b *directBackend) List(

@@ -2304,7 +2304,12 @@ func (s *Store) GetAnalyticsSignals(
 		tool_failure_signal_count, tool_retry_count,
 		edit_churn_count, compaction_count,
 		mid_task_compaction_count,
-		context_pressure_max
+		context_pressure_max,
+		quality_signal_version,
+		short_prompt_count, unstructured_start,
+		missing_success_criteria_count,
+		missing_verification_count, duplicate_prompt_count,
+		no_code_context_count, runaway_tool_loop_count
 		FROM sessions WHERE ` + where
 
 	rows, err := s.pg.QueryContext(ctx, query, pb.args...)
@@ -2329,6 +2334,12 @@ func (s *Store) GetAnalyticsSignals(
 			&r.ToolRetryCount, &r.EditChurnCount,
 			&r.CompactionCount, &r.MidTaskCompactionCount,
 			&r.ContextPressureMax,
+			&r.QualitySignalVersion,
+			&r.ShortPromptCount, &r.UnstructuredStart,
+			&r.MissingSuccessCriteriaCount,
+			&r.MissingVerificationCount,
+			&r.DuplicatePromptCount,
+			&r.NoCodeContextCount, &r.RunawayToolLoopCount,
 		); err != nil {
 			return db.SignalsAnalyticsResponse{}, fmt.Errorf(
 				"scanning signals row: %w", err,

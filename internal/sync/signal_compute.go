@@ -126,6 +126,18 @@ func computeSignalsFromMessages(
 		HealthGrade:            healthGrade,
 		HasToolCalls:           len(toolRows) > 0,
 		HasContextData:         hasContextData,
+		QualitySignals: db.QualitySignals{
+			Version:           db.CurrentQualitySignalVersion,
+			ShortPromptCount:  heuristics.ShortPromptCount,
+			UnstructuredStart: heuristics.UnstructuredStart,
+			MissingSuccessCriteriaCount: heuristics.
+				MissingSuccessCriteriaCount,
+			MissingVerificationCount: heuristics.
+				MissingVerificationCount,
+			DuplicatePromptCount: heuristics.DuplicatePromptCount,
+			NoCodeContextCount:   heuristics.NoCodeContextCount,
+			RunawayToolLoopCount: heuristics.RunawayToolLoopCount,
+		},
 	}
 }
 
