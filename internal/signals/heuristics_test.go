@@ -139,7 +139,7 @@ func TestAnalyzeHeuristics_CodeContext(t *testing.T) {
 			want: 0,
 		},
 		{
-			name: "read tool activity is context",
+			name: "grep tool activity is context",
 			in: HeuristicInput{
 				Messages: []HeuristicMessage{
 					{
@@ -149,7 +149,23 @@ func TestAnalyzeHeuristics_CodeContext(t *testing.T) {
 					},
 				},
 				ToolRows: []ToolCallRow{
-					{Category: "Search", ToolName: "Grep"},
+					{Category: "Grep", ToolName: "Grep"},
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "glob tool activity is context",
+			in: HeuristicInput{
+				Messages: []HeuristicMessage{
+					{
+						Role: "user",
+						Content: "Fix the backend test failure in " +
+							"the codebase.",
+					},
+				},
+				ToolRows: []ToolCallRow{
+					{Category: "Glob", ToolName: "Glob"},
 				},
 			},
 			want: 0,
@@ -207,16 +223,16 @@ func TestAnalyzeHeuristics_RunawayToolLoop(t *testing.T) {
 	t.Run("ordinary varied calls", func(t *testing.T) {
 		calls := []ToolCallRow{
 			{Category: "Read", ToolName: "Read", InputJSON: `{"file_path":"a.go"}`},
-			{Category: "Search", ToolName: "Grep", InputJSON: `{"pattern":"x"}`},
+			{Category: "Grep", ToolName: "Grep", InputJSON: `{"pattern":"x"}`},
 			{Category: "Edit", ToolName: "Edit", InputJSON: `{"file_path":"a.go"}`},
 			{Category: "Bash", ToolName: "Bash", InputJSON: `{"command":"go test ./..."}`},
 			{Category: "Read", ToolName: "Read", InputJSON: `{"file_path":"b.go"}`},
 			{Category: "Edit", ToolName: "Edit", InputJSON: `{"file_path":"b.go"}`},
-			{Category: "Search", ToolName: "Grep", InputJSON: `{"pattern":"y"}`},
+			{Category: "Glob", ToolName: "Glob", InputJSON: `{"pattern":"*.go"}`},
 			{Category: "Bash", ToolName: "Bash", InputJSON: `{"command":"go test ./internal/db"}`},
 			{Category: "Read", ToolName: "Read", InputJSON: `{"file_path":"c.go"}`},
 			{Category: "Edit", ToolName: "Edit", InputJSON: `{"file_path":"c.go"}`},
-			{Category: "Search", ToolName: "Grep", InputJSON: `{"pattern":"z"}`},
+			{Category: "Grep", ToolName: "Grep", InputJSON: `{"pattern":"z"}`},
 			{Category: "Bash", ToolName: "Bash", InputJSON: `{"command":"go test ./internal/signals"}`},
 		}
 		got := AnalyzeHeuristics(HeuristicInput{ToolRows: calls})
