@@ -82,23 +82,30 @@ test.describe("Insights quality rollout", () => {
 
     await page.goto("/insights");
 
+    const archive = page.getByRole("region", {
+      name: "Generated Insights Archive",
+    });
+    const savedInsight = archive.getByRole("button", {
+      name: /Prompt Maturity global/,
+    });
     await expect(
-      page.getByRole("button", { name: /Generated Prompt Maturity global/ }),
+      page.getByRole("heading", { name: "Quality Patterns" }),
     ).toBeVisible();
-    await page
-      .getByRole("button", { name: /Generated Prompt Maturity global/ })
-      .click();
+    await expect(savedInsight).toBeVisible();
+    await savedInsight.click();
 
     await expect(
-      page.locator(".header-badge", {
-        hasText: "Generated Recommendation",
+      page.locator(".generated-detail .badge", {
+        hasText: "Prompt Maturity",
       }),
     ).toBeVisible();
     await expect(page.getByText("cache hit")).toBeVisible();
     await expect(page.getByText("template v1")).toBeVisible();
     await expect(page.getByText("aggregate abcdef123456")).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: "Prompt Maturity" }),
+      page
+        .locator(".generated-detail")
+        .getByRole("heading", { name: "Prompt Maturity" }),
     ).toBeVisible();
     await expect(
       page.getByText(
@@ -129,8 +136,15 @@ test.describe("Insights quality rollout", () => {
     await page.goto("/insights");
 
     await expect(
-      page.getByText("Read-only remote mode cannot save generated insights."),
+      page.getByRole("heading", { name: "Generated Insights Archive" }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Generate" })).toBeDisabled();
+    await expect(
+      page.getByText("No generated insights saved."),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "Generated Insights Archive" })
+        .getByRole("button", { name: "Generate" }),
+    ).toBeDisabled();
   });
 });
