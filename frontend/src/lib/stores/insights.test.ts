@@ -265,6 +265,54 @@ describe("generate (multi-task)", () => {
     expect(insights.selectedId).toBe(10);
   });
 
+  it("moves cached result to top without duplicating the id", async () => {
+    const existing = makeInsight({ id: 10, content: "old" });
+    const cached = makeInsight({
+      id: 10,
+      content: "cached",
+      cache_status: "hit",
+    });
+    insights.items = [
+      makeInsight({ id: 1 }),
+      existing,
+      makeInsight({ id: 2 }),
+    ];
+    vi.mocked(api.generateInsight).mockReturnValueOnce({
+      abort: vi.fn(),
+      done: Promise.resolve(cached),
+    });
+
+    insights.generate();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(insights.items.map((s) => s.id)).toEqual([10, 1, 2]);
+    expect(insights.items[0]).toEqual(cached);
+    expect(insights.selectedId).toBe(10);
+  });
+
+  it("sends canned insight fields when generating recommendations", async () => {
+    insights.setType("llm_canned");
+    insights.setCannedKind("tool_reliability_review");
+    insights.promptText = "Focus on retries";
+    vi.mocked(api.generateInsight).mockReturnValueOnce({
+      abort: vi.fn(),
+      done: Promise.resolve(makeInsight({ id: 30 })),
+    });
+
+    insights.generate();
+
+    expect(api.generateInsight).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "llm_canned",
+        kind: "tool_reliability_review",
+        llm_opt_in: true,
+        prompt: "Focus on retries",
+      }),
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
   it("supports multiple concurrent tasks", async () => {
     const s1 = makeInsight({ id: 10 });
     const s2 = makeInsight({ id: 11 });

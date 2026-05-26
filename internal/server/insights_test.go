@@ -313,14 +313,56 @@ func TestGenerateCannedInsight_SaveCacheAndPreserveSignals(t *testing.T) {
 	}
 	events = parseSSE(w.Body.String())
 	foundCacheHit := false
+	var cached db.Insight
 	for _, ev := range events {
 		if ev.Event == "status" && strings.Contains(ev.Data, "cache_hit") {
 			foundCacheHit = true
+		}
+		if ev.Event == "done" {
+			if err := json.Unmarshal([]byte(ev.Data), &cached); err != nil {
+				t.Fatalf("decode cached insight: %v", err)
+			}
 		}
 	}
 	if !foundCacheHit {
 		t.Fatalf("expected cache_hit status, got %s", w.Body.String())
 	}
+	if cached.CacheStatus != "hit" {
+		t.Fatalf("cached CacheStatus = %q, want hit", cached.CacheStatus)
+	}
+	if !strings.Contains(cached.ProvenanceJSON, `"cache_status":"hit"`) {
+		t.Fatalf("cached provenance missing hit status: %s", cached.ProvenanceJSON)
+	}
+	stored, err := te.db.GetInsight(context.Background(), saved.ID)
+	if err != nil {
+		t.Fatalf("GetInsight stored: %v", err)
+	}
+	if stored == nil || stored.CacheStatus != "fresh" ||
+		!strings.Contains(stored.ProvenanceJSON, `"cache_status":"fresh"`) {
+		t.Fatalf("stored insight should keep original provenance: %+v", stored)
+	}
+}
+
+func TestGenerateCannedInsight_RejectsOversizedFocus(t *testing.T) {
+	te := setup(t)
+	longFocus := strings.Repeat("x", insight.MaxCannedFocusRunes+1)
+	body, err := json.Marshal(map[string]any{
+		"type":       "llm_canned",
+		"kind":       "prompt_maturity_review",
+		"date_from":  "2025-01-15",
+		"date_to":    "2025-01-15",
+		"agent":      "claude",
+		"llm_opt_in": true,
+		"prompt":     longFocus,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	w := te.post(t, "/api/v1/insights/generate", string(body))
+
+	assertStatus(t, w, http.StatusBadRequest)
+	assertBodyContains(t, w, "prompt is too long")
 }
 
 func TestGenerateInsight_ErrorMessageStripsStderr(t *testing.T) {

@@ -213,7 +213,10 @@ class InsightsStore {
         const filtersMatch =
           this.project === snap.project;
         if (filtersMatch) {
-          this.items = [insight, ...this.items];
+          this.items = [
+            insight,
+            ...this.items.filter((s) => s.id !== insight.id),
+          ];
           this.selectedId = insight.id;
         } else {
           this.load();

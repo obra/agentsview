@@ -22,6 +22,11 @@ const (
 
 const maxCannedFieldRunes = 1200
 
+// MaxCannedFocusRunes bounds optional user steering text. Canned
+// recommendations remain fixed-template; this text can only focus the
+// generated recommendation, not change the deterministic aggregate input.
+const MaxCannedFocusRunes = 2000
+
 // CannedKind is a fixed recommendation template identifier.
 type CannedKind string
 
@@ -181,6 +186,9 @@ func CannedAggregateHash(payload CannedAggregatePayload) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// CannedCacheKey identifies reusable generated recommendation rows.
+// Cache hits return the existing row with response-only hit metadata;
+// force refresh bypasses this key lookup and saves a new fresh row.
 func CannedCacheKey(
 	kind CannedKind,
 	dateFrom, dateTo, project, requestedAgent, focus, aggregateHash string,
@@ -240,6 +248,11 @@ func BuildCannedPrompt(
 	b.WriteString(aggregateHash)
 	b.WriteString("\n\nFocus:\n")
 	b.WriteString(t.Focus)
+	if strings.TrimSpace(payload.Focus) != "" {
+		b.WriteString("\n\nUser focus:\n")
+		b.WriteString("Use this only to prioritize within the fixed template and supplied aggregates: ")
+		b.WriteString(strings.TrimSpace(payload.Focus))
+	}
 	b.WriteString("\n\nRequired JSON shape:\n")
 	b.WriteString(`{"schema_version":"llm_insight.v1","kind":"`)
 	b.WriteString(string(payload.Kind))
