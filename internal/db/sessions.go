@@ -198,6 +198,30 @@ func (s Session) StoredQualitySignals() *QualitySignals {
 	}
 }
 
+// ApplyQualitySignals maps the grouped API representation back to the
+// scalar persistence fields used internally.
+func (s *Session) ApplyQualitySignals(qs *QualitySignals) {
+	if qs == nil {
+		s.QualitySignalVersion = 0
+		s.ShortPromptCount = 0
+		s.UnstructuredStart = false
+		s.MissingSuccessCriteriaCount = 0
+		s.MissingVerificationCount = 0
+		s.DuplicatePromptCount = 0
+		s.NoCodeContextCount = 0
+		s.RunawayToolLoopCount = 0
+		return
+	}
+	s.QualitySignalVersion = qs.Version
+	s.ShortPromptCount = qs.ShortPromptCount
+	s.UnstructuredStart = qs.UnstructuredStart
+	s.MissingSuccessCriteriaCount = qs.MissingSuccessCriteriaCount
+	s.MissingVerificationCount = qs.MissingVerificationCount
+	s.DuplicatePromptCount = qs.DuplicatePromptCount
+	s.NoCodeContextCount = qs.NoCodeContextCount
+	s.RunawayToolLoopCount = qs.RunawayToolLoopCount
+}
+
 // MarshalJSON exposes quality signals as a grouped optional object
 // without leaking the scalar persistence columns into the API.
 func (s Session) MarshalJSON() ([]byte, error) {
@@ -209,6 +233,22 @@ func (s Session) MarshalJSON() ([]byte, error) {
 		sessionAlias:   sessionAlias(s),
 		QualitySignals: s.StoredQualitySignals(),
 	})
+}
+
+// UnmarshalJSON accepts the grouped API quality_signals object and
+// restores the scalar fields used by service and persistence code.
+func (s *Session) UnmarshalJSON(data []byte) error {
+	type sessionAlias Session
+	var v struct {
+		sessionAlias
+		QualitySignals *QualitySignals `json:"quality_signals"`
+	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	*s = Session(v.sessionAlias)
+	s.ApplyQualitySignals(v.QualitySignals)
+	return nil
 }
 
 // Session represents a row in the sessions table.

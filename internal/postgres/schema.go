@@ -1465,6 +1465,20 @@ func CheckSchemaCompat(
 	rows.Close()
 
 	rows, err = db.QueryContext(ctx,
+		`SELECT quality_signal_version, short_prompt_count,
+			unstructured_start, missing_success_criteria_count,
+			missing_verification_count, duplicate_prompt_count,
+			no_code_context_count, runaway_tool_loop_count
+		 FROM sessions LIMIT 0`)
+	if err != nil {
+		return fmt.Errorf(
+			"sessions table missing quality signal columns: %w",
+			err,
+		)
+	}
+	rows.Close()
+
+	rows, err = db.QueryContext(ctx,
 		`SELECT event_index FROM tool_result_events LIMIT 0`)
 	if err != nil {
 		return fmt.Errorf(

@@ -122,6 +122,26 @@ func (d SessionDetail) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON preserves the grouped quality_signals object when
+// SessionDetail is decoded by the HTTP-backed service.
+func (d *SessionDetail) UnmarshalJSON(data []byte) error {
+	type sessionAlias db.Session
+	var v struct {
+		sessionAlias
+		QualitySignals   *db.QualitySignals `json:"quality_signals"`
+		HealthScoreBasis []string           `json:"health_score_basis"`
+		HealthPenalties  map[string]int     `json:"health_penalties"`
+	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	d.Session = db.Session(v.sessionAlias)
+	d.Session.ApplyQualitySignals(v.QualitySignals)
+	d.HealthScoreBasis = v.HealthScoreBasis
+	d.HealthPenalties = v.HealthPenalties
+	return nil
+}
+
 // SessionList mirrors GET /api/v1/sessions.
 type SessionList struct {
 	Sessions   []db.Session `json:"sessions"`
