@@ -365,6 +365,84 @@ func TestGenerateCannedInsight_RejectsOversizedFocus(t *testing.T) {
 	assertBodyContains(t, w, "prompt is too long")
 }
 
+func TestGenerateCannedInsight_NormalizesFocusBeforeCaching(t *testing.T) {
+	var calls atomic.Int32
+	var generatedPrompt string
+	stubGen := func(
+		_ context.Context, _ string, prompt string, _ insight.LogFunc,
+	) (insight.Result, error) {
+		calls.Add(1)
+		generatedPrompt = prompt
+		return insight.Result{
+			Agent: "claude",
+			Model: "test-model",
+			Content: `{
+				"schema_version":"llm_insight.v1",
+				"kind":"prompt_maturity_review",
+				"summary":"Prompt starts are mostly healthy, with a few places to tighten acceptance criteria.",
+				"confidence":"medium",
+				"recommendations":[{
+					"title":"Add explicit verification asks",
+					"rationale":"The selected aggregate has scored sessions and outcome data, so verification wording can be improved without changing scores.",
+					"actions":["Add acceptance criteria to implementation prompts","Ask for validation commands in task handoffs"],
+					"evidence_refs":["aggregate:empty"],
+					"impact":"medium",
+					"effort":"low"
+				}],
+				"risks":[{
+					"title":"Evidence is aggregate-only",
+					"explanation":"This recommendation does not inspect raw transcript text.",
+					"evidence_refs":["aggregate:empty"]
+				}],
+				"evidence_refs":["aggregate:empty"]
+			}`,
+		}, nil
+	}
+	te := setupWithServerOpts(t, []server.Option{
+		server.WithGenerateStreamFunc(stubGen),
+	})
+
+	padded := strings.Repeat(" ", 5) + "Focus on retries" + strings.Repeat("\n", 4)
+	body, err := json.Marshal(map[string]any{
+		"type":       "llm_canned",
+		"kind":       "prompt_maturity_review",
+		"date_from":  "2025-01-15",
+		"date_to":    "2025-01-15",
+		"agent":      "claude",
+		"llm_opt_in": true,
+		"prompt":     padded,
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	w := te.post(t, "/api/v1/insights/generate", string(body))
+	assertStatus(t, w, http.StatusOK)
+	events := parseSSE(w.Body.String())
+	if len(events) == 0 || events[len(events)-1].Event != "done" {
+		t.Fatalf("expected done event, got %s", w.Body.String())
+	}
+	var saved db.Insight
+	if err := json.Unmarshal([]byte(events[len(events)-1].Data), &saved); err != nil {
+		t.Fatalf("decode saved insight: %v", err)
+	}
+	if saved.Prompt == nil || *saved.Prompt != "Focus on retries" {
+		t.Fatalf("saved Prompt = %v, want trimmed focus", saved.Prompt)
+	}
+	if strings.Contains(generatedPrompt, padded) ||
+		!strings.Contains(generatedPrompt, "Focus on retries") {
+		t.Fatalf("generated prompt did not normalize focus: %q", generatedPrompt)
+	}
+
+	trimmedPayload := `{"type":"llm_canned","kind":"prompt_maturity_review","date_from":"2025-01-15","date_to":"2025-01-15","agent":"claude","llm_opt_in":true,"prompt":"Focus on retries"}`
+	w = te.post(t, "/api/v1/insights/generate", trimmedPayload)
+	assertStatus(t, w, http.StatusOK)
+	if calls.Load() != 1 {
+		t.Fatalf("generator calls = %d, want 1 after normalized cache hit", calls.Load())
+	}
+	assertBodyContains(t, w, "cache_hit")
+}
+
 func TestGenerateInsight_ErrorMessageStripsStderr(t *testing.T) {
 	stubGen := func(
 		_ context.Context, _, _ string,

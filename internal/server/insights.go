@@ -54,6 +54,7 @@ func insightGenerateClientMessage(
 func (s *Server) humaGenerateCannedInsight(
 	req generateInsightRequest,
 ) (*huma.StreamResponse, error) {
+	req.Prompt = strings.TrimSpace(req.Prompt)
 	kind := insight.CannedKind(req.Kind)
 	if !insight.ValidCannedKinds[kind] {
 		return nil, apiError(http.StatusBadRequest,
@@ -67,10 +68,9 @@ func (s *Server) humaGenerateCannedInsight(
 		return nil, apiError(http.StatusBadRequest,
 			"llm_opt_in must be true for canned insights")
 	}
-	if len([]rune(strings.TrimSpace(req.Prompt))) > insight.MaxCannedFocusRunes {
-		writeError(w, http.StatusBadRequest,
+	if len([]rune(req.Prompt)) > insight.MaxCannedFocusRunes {
+		return nil, apiError(http.StatusBadRequest,
 			"prompt is too long for canned insight focus")
-		return
 	}
 	if !timeutil.IsValidDate(req.DateFrom) {
 		return nil, apiError(http.StatusBadRequest,
