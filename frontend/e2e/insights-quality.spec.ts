@@ -135,6 +135,12 @@ test.describe("Insights quality rollout", () => {
     await expect(
       page.getByText("Deterministic health scores and signal rows were not modified."),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Delete generated insight" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Delete", exact: true }),
+    ).toHaveCount(0);
 
     const copyLink = page.getByRole("button", {
       name: "Copy generated insight link",
@@ -245,6 +251,9 @@ test.describe("Insights quality rollout", () => {
 
     await expect(
       archive.getByText("generated insight failed validation"),
+    ).toBeVisible();
+    await expect(
+      archive.getByRole("button", { name: "Dismiss failed generation" }),
     ).toBeVisible();
 
     await archive.getByRole("button", { name: "Retry" }).click();

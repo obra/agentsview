@@ -731,12 +731,28 @@
                   <div class="generated-actions">
                     <button
                       class="text-btn"
+                      type="button"
                       onclick={() =>
                         insights.retryTask(
                           insights.selectedTask!.clientId,
                         )}
                     >
                       Retry
+                    </button>
+                    <button
+                      class="icon-action danger"
+                      type="button"
+                      onclick={() =>
+                        insights.dismissTask(
+                          insights.selectedTask!.clientId,
+                        )}
+                      title="Dismiss failed generation"
+                      aria-label="Dismiss failed generation"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                        <path d="M5.5 5.5A.5.5 0 016 6v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm2.5 0a.5.5 0 01.5.5v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm3 .5a.5.5 0 00-1 0v6a.5.5 0 001 0V6z"/>
+                        <path fill-rule="evenodd" d="M14.5 3a1 1 0 01-1 1H13v9a2 2 0 01-2 2H5a2 2 0 01-2-2V4h-.5a1 1 0 01-1-1V2a1 1 0 011-1H5.5l1-1h3l1 1h2.5a1 1 0 011 1v1zM4.118 4L4 4.059V13a1 1 0 001 1h6a1 1 0 001-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                      </svg>
                     </button>
                   </div>
                 {/if}
@@ -785,15 +801,21 @@
                       handleCopyInsightLink(insights.selectedItem!.id)}
                   />
                   <button
-                    class="text-btn danger"
+                    class="icon-action danger"
+                    type="button"
                     onclick={() => {
                       if (insights.selectedItem) {
                         insights.deleteItem(insights.selectedItem.id);
                         router.replaceParams({});
                       }
                     }}
+                    title="Delete generated insight"
+                    aria-label="Delete generated insight"
                   >
-                    Delete
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                      <path d="M5.5 5.5A.5.5 0 016 6v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm2.5 0a.5.5 0 01.5.5v6a.5.5 0 01-1 0V6a.5.5 0 01.5-.5zm3 .5a.5.5 0 00-1 0v6a.5.5 0 001 0V6z"/>
+                      <path fill-rule="evenodd" d="M14.5 3a1 1 0 01-1 1H13v9a2 2 0 01-2 2H5a2 2 0 01-2-2V4h-.5a1 1 0 01-1-1V2a1 1 0 011-1H5.5l1-1h3l1 1h2.5a1 1 0 011 1v1zM4.118 4L4 4.059V13a1 1 0 001 1h6a1 1 0 001-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                    </svg>
                   </button>
                 </div>
               </div>
@@ -1446,6 +1468,39 @@
 
   .generated-actions :global(.insight-link-copy.copy-btn:hover) {
     border-color: var(--border-default);
+  }
+
+  .icon-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius-sm);
+    background: var(--bg-inset);
+    color: var(--text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition:
+      background 0.15s,
+      border-color 0.15s,
+      color 0.15s,
+      transform 0.08s;
+  }
+
+  .icon-action:hover {
+    background: var(--bg-surface-hover);
+    border-color: var(--border-default);
+    color: var(--text-primary);
+  }
+
+  .icon-action.danger:hover {
+    color: var(--accent-red);
+  }
+
+  .icon-action:active {
+    transform: scale(0.94);
   }
 
   .detail-chip {
