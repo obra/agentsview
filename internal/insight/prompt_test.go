@@ -306,6 +306,55 @@ func TestBuildCannedPromptIncludesBoundaries(t *testing.T) {
 	}
 }
 
+func TestBuildCannedPromptContextSetupPressureUnavailable(t *testing.T) {
+	payload := CannedAggregatePayload{
+		Kind:     CannedContextSetupReview,
+		DateFrom: "2025-01-15",
+		DateTo:   "2025-01-16",
+		Signals: db.SignalsAnalyticsResponse{
+			ContextHealth: db.SignalsContextHealth{
+				SessionsWithContextData:   0,
+				AvgContextPressure:        nil,
+				SessionsWithCompaction:    5,
+				MidTaskCompactionCount:    2,
+				SessionsWithMidTaskCompac: 2,
+			},
+			QualityHealth: db.SignalsQualityHealth{
+				ComputedSessions: 10,
+				Totals: db.QualitySignalTotals{
+					NoCodeContextCount: 3,
+				},
+				SessionsWithSignal: db.QualitySignalTotals{
+					NoCodeContextCount: 3,
+				},
+			},
+		},
+		EvidenceRefs: []CannedEvidenceRef{
+			{ID: "signals:context_health", Description: "context health"},
+			{ID: "signals:quality_health", Description: "quality health"},
+		},
+	}
+	hash, err := CannedAggregateHash(payload)
+	if err != nil {
+		t.Fatalf("CannedAggregateHash: %v", err)
+	}
+	prompt, err := BuildCannedPrompt(payload, hash)
+	if err != nil {
+		t.Fatalf("BuildCannedPrompt: %v", err)
+	}
+	for _, want := range []string{
+		"Context setup template rules",
+		"Context pressure coverage is zero or unavailable",
+		"do not make pressure-related recommendations or risks",
+		"Do not use missing context pressure telemetry as the main recommendation",
+		"Prefer compactions, mid-task compactions, missing code context",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q: %s", want, prompt)
+		}
+	}
+}
+
 func TestBuildCannedCoachSummaryUsesCoachInsightFamilies(t *testing.T) {
 	releasePrompt := "Generate release notes for the current build and verify changelog links"
 	sessions := []db.Session{

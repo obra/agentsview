@@ -66,10 +66,10 @@ var cannedTemplates = map[CannedKind]cannedTemplate{
 	},
 	CannedContextSetupReview: {
 		ID:      "context_setup_review",
-		Version: "2026-05-26",
+		Version: "2026-05-27",
 		Title:   "Context Setup Review",
 		Focus: "Review context setup using only the supplied deterministic aggregates and Coach-derived spec/context signals. " +
-			"Focus on context pressure, compactions, spec-driven starts, and whether sessions have usable context evidence.",
+			"Focus on compactions, mid-task context loss, spec-driven starts, missing code context, and context pressure when pressure data is available.",
 	},
 	CannedWorkflowHygieneReview: {
 		ID:      "workflow_hygiene_review",
@@ -322,6 +322,7 @@ func BuildCannedPrompt(
 	b.WriteString("- Copy evidence_ref IDs exactly; do not invent more specific sub-refs.\n")
 	b.WriteString("- Keep fields concise and action-oriented.\n")
 	b.WriteString("- If evidence is weak or empty, lower confidence and say what deterministic data is missing.\n\n")
+	writeCannedKindRules(&b, payload)
 	b.WriteString("Valid evidence_ref IDs for this request:\n")
 	if len(payload.EvidenceRefs) == 0 {
 		b.WriteString("- aggregate:empty\n")
@@ -336,6 +337,26 @@ func BuildCannedPrompt(
 	b.WriteString("Aggregate payload JSON:\n")
 	b.Write(data)
 	return b.String(), nil
+}
+
+func writeCannedKindRules(
+	b *strings.Builder,
+	payload CannedAggregatePayload,
+) {
+	switch payload.Kind {
+	case CannedContextSetupReview:
+		ctx := payload.Signals.ContextHealth
+		b.WriteString("Context setup template rules:\n")
+		b.WriteString("- Treat context pressure as an optional signal, not a required finding.\n")
+		if ctx.SessionsWithContextData == 0 || ctx.AvgContextPressure == nil {
+			b.WriteString("- Context pressure coverage is zero or unavailable for this request; do not make pressure-related recommendations or risks.\n")
+			b.WriteString("- Do not use missing context pressure telemetry as the main recommendation. Prefer compactions, mid-task compactions, missing code context, spec-driven starts, and prompt maturity signals when those aggregates are present.\n")
+			b.WriteString("- If no non-pressure context setup signals are present, set confidence to low and state that deterministic context setup evidence is weak.\n")
+		} else {
+			b.WriteString("- Context pressure coverage is present; pressure conclusions must cite the aggregate pressure fields and stay proportional to the covered session count.\n")
+		}
+		b.WriteString("\n")
+	}
 }
 
 func ParseCannedEnvelope(raw string) (CannedRecommendationEnvelope, error) {
