@@ -871,7 +871,8 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    min-width: 210px;
+    flex: 0 0 220px;
+    min-width: 220px;
   }
 
   .toolbar-scope span {
@@ -900,6 +901,11 @@
 
   .filter-group > :global(.typeahead:nth-child(2)) {
     flex: 0 0 120px;
+  }
+
+  .toolbar-scope :global(.typeahead) {
+    flex: 0 0 128px;
+    width: 128px;
   }
 
   .icon-btn {
