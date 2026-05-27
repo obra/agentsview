@@ -295,6 +295,8 @@ func TestBuildCannedPromptIncludesBoundaries(t *testing.T) {
 		"tool_reliability_review",
 		"User focus",
 		"Emphasize repeated shell failures.",
+		"Copy evidence_ref IDs exactly",
+		"- signals:tool_health",
 		hash,
 		"Aggregate payload JSON",
 	} {

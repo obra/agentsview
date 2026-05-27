@@ -305,9 +305,21 @@ func BuildCannedPrompt(
 	b.WriteString("- Include 1 to 5 recommendations.\n")
 	b.WriteString("- Include at most 4 risks.\n")
 	b.WriteString("- Every recommendation and risk must cite evidence_refs from the aggregate payload.\n")
-	b.WriteString("- Do not emit evidence refs that are absent from the payload.\n")
+	b.WriteString("- Do not emit evidence refs that are absent from the valid evidence_ref list below.\n")
+	b.WriteString("- Copy evidence_ref IDs exactly; do not invent more specific sub-refs.\n")
 	b.WriteString("- Keep fields concise and action-oriented.\n")
 	b.WriteString("- If evidence is weak or empty, lower confidence and say what deterministic data is missing.\n\n")
+	b.WriteString("Valid evidence_ref IDs for this request:\n")
+	if len(payload.EvidenceRefs) == 0 {
+		b.WriteString("- aggregate:empty\n")
+	} else {
+		for _, ref := range payload.EvidenceRefs {
+			b.WriteString("- ")
+			b.WriteString(ref.ID)
+			b.WriteString("\n")
+		}
+	}
+	b.WriteString("\n")
 	b.WriteString("Aggregate payload JSON:\n")
 	b.Write(data)
 	return b.String(), nil
