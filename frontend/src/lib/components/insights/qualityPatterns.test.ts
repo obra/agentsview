@@ -142,6 +142,69 @@ describe("quality pattern transforms", () => {
     );
   });
 
+  it("surfaces missing code context as a context-health driver", () => {
+    const context = buildQualityPatterns(makeSignals())[1];
+
+    expect(context).toBeDefined();
+    if (!context) return;
+    expect(context.title).toBe("Context health");
+    expect(context.summary).toContain("Code-context gaps");
+    expect(context.drivers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "no_code_context_count",
+          label: "Missing code context",
+          total: 1,
+          sessions: 1,
+        }),
+      ]),
+    );
+  });
+
+  it("surfaces runaway tool loops as workflow hygiene", () => {
+    const signals = makeSignals({
+      outcome_distribution: { completed: 6 },
+      quality_health: {
+        computed_sessions: 4,
+        totals: {
+          short_prompt_count: 0,
+          unstructured_start: 0,
+          missing_success_criteria_count: 0,
+          missing_verification_count: 0,
+          duplicate_prompt_count: 0,
+          no_code_context_count: 0,
+          runaway_tool_loop_count: 2,
+        },
+        sessions_with_signal: {
+          short_prompt_count: 0,
+          unstructured_start: 0,
+          missing_success_criteria_count: 0,
+          missing_verification_count: 0,
+          duplicate_prompt_count: 0,
+          no_code_context_count: 0,
+          runaway_tool_loop_count: 2,
+        },
+      },
+    });
+    const workflow = buildQualityPatterns(signals)[2];
+
+    expect(workflow).toBeDefined();
+    if (!workflow) return;
+    expect(workflow.title).toBe("Workflow hygiene");
+    expect(workflow.affectedSessions).toBe(2);
+    expect(workflow.severity).toBe("warning");
+    expect(workflow.drivers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "runaway_tool_loop_count",
+          label: "Runaway tool loops",
+          total: 2,
+          sessions: 2,
+        }),
+      ]),
+    );
+  });
+
   it("does not recommend unavailable or clear patterns", () => {
     const signals = makeSignals({
       outcome_distribution: { completed: 6 },

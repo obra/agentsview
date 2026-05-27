@@ -217,6 +217,9 @@ function contextHealthPattern(
   signals: SignalsAnalyticsResponse,
 ): QualityPatternView {
   const h = signals.context_health;
+  const totals = signals.quality_health?.totals ?? emptyTotals;
+  const sessions =
+    signals.quality_health?.sessions_with_signal ?? emptyTotals;
   const total = totalSessions(signals);
   const drivers: QualityPatternDriver[] = [
     {
@@ -237,6 +240,12 @@ function contextHealthPattern(
       total: h.high_pressure_sessions,
       sessions: h.high_pressure_sessions,
     },
+    signalDriver(
+      "no_code_context_count",
+      "Missing code context",
+      totals,
+      sessions,
+    ),
   ];
   const affected = maxSessions(drivers);
 
@@ -244,7 +253,7 @@ function contextHealthPattern(
     id: "context_health",
     title: "Context health",
     summary:
-      "Compactions, mid-task context loss, and high context pressure.",
+      "Code-context gaps, compactions, mid-task context loss, and high context pressure.",
     severity: severityFromRatio(affected, total),
     severityDescription: severityDescription(affected, total),
     affectedSessions: affected,
@@ -262,16 +271,26 @@ function workflowHygienePattern(
   signals: SignalsAnalyticsResponse,
 ): QualityPatternView {
   const outcomes = signals.outcome_distribution ?? {};
+  const totals = signals.quality_health?.totals ?? emptyTotals;
+  const sessions =
+    signals.quality_health?.sessions_with_signal ?? emptyTotals;
   const total = totalSessions(signals);
   const errored = outcomes.errored ?? 0;
   const abandoned = outcomes.abandoned ?? 0;
-  const affected = errored + abandoned;
+  const interrupted = errored + abandoned;
+  const runawayDriver = signalDriver(
+    "runaway_tool_loop_count",
+    "Runaway tool loops",
+    totals,
+    sessions,
+  );
+  const affected = Math.max(interrupted, runawayDriver.sessions);
 
   return {
     id: "workflow_hygiene",
     title: "Workflow hygiene",
     summary:
-      "Errored and abandoned sessions, derived from termination outcome signals.",
+      "Errored, abandoned, and runaway-tool-loop sessions.",
     severity: severityFromRatio(affected, total),
     severityDescription: severityDescription(affected, total),
     affectedSessions: affected,
@@ -295,6 +314,7 @@ function workflowHygienePattern(
         total: outcomes.completed ?? 0,
         sessions: outcomes.completed ?? 0,
       },
+      runawayDriver,
     ],
     trend: signals.trend.map((t) => ({
       date: t.date,
