@@ -162,7 +162,7 @@ function promptMaturityPattern(
   const drivers: QualityPatternDriver[] = [
     signalDriver(
       "short_prompt_count",
-      "Short starts",
+      "Short task starts",
       totals,
       sessions,
       "weak",

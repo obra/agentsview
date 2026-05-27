@@ -17,13 +17,13 @@ func TestAnalyzeHeuristics_PromptQuality(t *testing.T) {
 			want: HeuristicSignals{},
 		},
 		{
-			name: "counts short substantive prompts",
+			name: "counts only short task-start prompts",
 			in: HeuristicInput{Messages: []HeuristicMessage{
 				{Role: "user", Content: "fix bug"},
 				{Role: "user", Content: "add tests"},
 			}},
 			want: HeuristicSignals{
-				ShortPromptCount:            2,
+				ShortPromptCount:            1,
 				UnstructuredStart:           true,
 				MissingSuccessCriteriaCount: 1,
 				NoCodeContextCount:          1,
@@ -78,6 +78,42 @@ func TestAnalyzeHeuristics_PromptQuality(t *testing.T) {
 					got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAnalyzeHeuristics_ShortStartsIgnoreRecentSteering(t *testing.T) {
+	in := HeuristicInput{Messages: []HeuristicMessage{
+		{
+			Role:      "user",
+			Content:   "Please fix the parser bug in internal/parser.go.",
+			Timestamp: "2026-05-27T10:00:00Z",
+		},
+		{
+			Role:      "assistant",
+			Content:   "I changed the parser.",
+			Timestamp: "2026-05-27T10:05:00Z",
+		},
+		{
+			Role:      "user",
+			Content:   "add tests",
+			Timestamp: "2026-05-27T10:06:00Z",
+		},
+		{
+			Role:      "assistant",
+			Content:   "Done.",
+			Timestamp: "2026-05-27T10:10:00Z",
+		},
+		{
+			Role:      "user",
+			Content:   "fix docs",
+			Timestamp: "2026-05-27T11:00:01Z",
+		},
+	}}
+
+	got := AnalyzeHeuristics(in)
+	if got.ShortPromptCount != 1 {
+		t.Fatalf("ShortPromptCount = %d, want 1",
+			got.ShortPromptCount)
 	}
 }
 

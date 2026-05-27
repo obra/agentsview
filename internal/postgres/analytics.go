@@ -2507,6 +2507,7 @@ func (s *Store) signalMessages(
 			placeholders = append(placeholders, pb.add(id))
 		}
 		q := `SELECT session_id, ordinal, role, content,
+					COALESCE(timestamp::text, ''),
 					is_system, has_tool_use
 				FROM messages
 				WHERE session_id IN (` + strings.Join(placeholders, ",") + `)
@@ -2522,7 +2523,8 @@ func (s *Store) signalMessages(
 			var m db.SignalMessage
 			if err := msgRows.Scan(
 				&m.SessionID, &m.Ordinal, &m.Role,
-				&m.Content, &m.IsSystem, &m.HasToolUse,
+				&m.Content, &m.Timestamp,
+				&m.IsSystem, &m.HasToolUse,
 			); err != nil {
 				return fmt.Errorf(
 					"scanning signal message: %w", err,

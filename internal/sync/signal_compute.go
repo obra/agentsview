@@ -147,10 +147,11 @@ func extractHeuristicMessages(
 	rows := make([]signals.HeuristicMessage, 0, len(msgs))
 	for _, m := range msgs {
 		rows = append(rows, signals.HeuristicMessage{
-			Role:     m.Role,
-			Content:  m.Content,
-			IsSystem: m.IsSystem,
-			Ordinal:  m.Ordinal,
+			Role:      m.Role,
+			Content:   m.Content,
+			IsSystem:  m.IsSystem,
+			Ordinal:   m.Ordinal,
+			Timestamp: m.Timestamp,
 		})
 	}
 	return rows

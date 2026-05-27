@@ -5,16 +5,18 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 )
 
 // HeuristicMessage is the message subset needed by deterministic
 // session-quality heuristics.
 type HeuristicMessage struct {
-	Role     string
-	Content  string
-	IsSystem bool
-	Ordinal  int
+	Role      string
+	Content   string
+	IsSystem  bool
+	Ordinal   int
+	Timestamp string
 }
 
 // HeuristicInput holds session data for deterministic prompt and
@@ -61,14 +63,7 @@ func AnalyzeHeuristics(in HeuristicInput) HeuristicSignals {
 	codeTask := isCodeTask(prompts)
 
 	var s HeuristicSignals
-	for _, p := range prompts {
-		if isControlPrompt(p.Normalized) {
-			continue
-		}
-		if len(p.Normalized) > 0 && len(p.Normalized) < 30 {
-			s.ShortPromptCount++
-		}
-	}
+	s.ShortPromptCount = countShortStartPrompts(prompts)
 
 	if codeTask {
 		if first, ok := firstSubstantivePrompt(prompts); ok {
@@ -126,28 +121,119 @@ func CountFrustrationMarkers(msgs []HeuristicMessage) int {
 }
 
 type promptInfo struct {
-	Content    string
-	Normalized string
-	Tokens     []string
+	Content                     string
+	Normalized                  string
+	Tokens                      []string
+	Index                       int
+	Ordinal                     int
+	Timestamp                   string
+	HasPreviousAssistant        bool
+	PreviousAssistantTimestamp  string
+	FirstUserAfterLastAssistant bool
 }
 
 func userPrompts(msgs []HeuristicMessage) []promptInfo {
 	prompts := make([]promptInfo, 0)
+	var previousAssistantTimestamp string
+	hasPreviousAssistant := false
+	userSinceLastAssistant := false
 	for _, m := range msgs {
-		if m.IsSystem || m.Role != "user" {
+		if m.IsSystem {
+			continue
+		}
+		if m.Role == "assistant" {
+			previousAssistantTimestamp = m.Timestamp
+			hasPreviousAssistant = true
+			userSinceLastAssistant = false
+			continue
+		}
+		if m.Role != "user" {
 			continue
 		}
 		normalized := normalizePrompt(m.Content)
 		if normalized == "" {
 			continue
 		}
+		firstAfterAssistant := !userSinceLastAssistant
 		prompts = append(prompts, promptInfo{
-			Content:    m.Content,
-			Normalized: normalized,
-			Tokens:     promptTokens(normalized),
+			Content:                     m.Content,
+			Normalized:                  normalized,
+			Tokens:                      promptTokens(normalized),
+			Index:                       len(prompts),
+			Ordinal:                     m.Ordinal,
+			Timestamp:                   m.Timestamp,
+			HasPreviousAssistant:        hasPreviousAssistant,
+			PreviousAssistantTimestamp:  previousAssistantTimestamp,
+			FirstUserAfterLastAssistant: firstAfterAssistant,
 		})
+		if !isControlPrompt(normalized) {
+			userSinceLastAssistant = true
+		}
 	}
 	return prompts
+}
+
+func countShortStartPrompts(prompts []promptInfo) int {
+	first, ok := firstSubstantivePrompt(prompts)
+	if !ok {
+		return 0
+	}
+	count := 0
+	for _, p := range prompts {
+		if !isShortPrompt(p) {
+			continue
+		}
+		if p.Index == first.Index {
+			count++
+			continue
+		}
+		if p.FirstUserAfterLastAssistant &&
+			hasStaleAssistantBefore(p) {
+			count++
+		}
+	}
+	return count
+}
+
+func isShortPrompt(p promptInfo) bool {
+	return !isControlPrompt(p.Normalized) &&
+		len(p.Normalized) > 0 &&
+		len(p.Normalized) < 30
+}
+
+func hasStaleAssistantBefore(p promptInfo) bool {
+	if !p.HasPreviousAssistant {
+		return false
+	}
+	userTime, ok := parsePromptTime(p.Timestamp)
+	if !ok {
+		return false
+	}
+	assistantTime, ok := parsePromptTime(
+		p.PreviousAssistantTimestamp,
+	)
+	if !ok {
+		return false
+	}
+	return userTime.Sub(assistantTime) > 30*time.Minute
+}
+
+func parsePromptTime(raw string) (time.Time, bool) {
+	if raw == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05-07:00",
+	} {
+		t, err := time.Parse(layout, raw)
+		if err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func normalizePrompt(content string) string {

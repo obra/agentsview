@@ -2969,6 +2969,7 @@ type SignalMessage struct {
 	Ordinal    int
 	Role       string
 	Content    string
+	Timestamp  string
 	IsSystem   bool
 	HasToolUse bool
 }
@@ -3345,7 +3346,7 @@ func (db *DB) signalMessages(
 	err := queryChunked(ids, func(chunk []string) error {
 		ph, args := inPlaceholders(chunk)
 		q := `SELECT session_id, ordinal, role, content,
-					is_system, has_tool_use
+					COALESCE(timestamp, ''), is_system, has_tool_use
 				FROM messages
 				WHERE session_id IN ` + ph + `
 				ORDER BY session_id, ordinal`
@@ -3360,7 +3361,8 @@ func (db *DB) signalMessages(
 			var m SignalMessage
 			if err := msgRows.Scan(
 				&m.SessionID, &m.Ordinal, &m.Role,
-				&m.Content, &m.IsSystem, &m.HasToolUse,
+				&m.Content, &m.Timestamp,
+				&m.IsSystem, &m.HasToolUse,
 			); err != nil {
 				return fmt.Errorf(
 					"scanning signal message: %w", err,
@@ -3466,20 +3468,99 @@ func firstFrustrationPrompt(
 func firstShortPrompt(
 	messages []SignalMessage,
 ) (string, *int, bool) {
+	firstUserOrdinal, ok := firstSubstantiveUserOrdinal(messages)
+	if !ok {
+		return "", nil, false
+	}
+	var previousAssistantTimestamp string
+	hasPreviousAssistant := false
+	userSinceLastAssistant := false
 	for _, m := range messages {
+		if m.IsSystem {
+			continue
+		}
+		if m.Role == "assistant" {
+			previousAssistantTimestamp = m.Timestamp
+			hasPreviousAssistant = true
+			userSinceLastAssistant = false
+			continue
+		}
 		if !isUserEvidenceMessage(m) {
 			continue
 		}
+		firstAfterAssistant := !userSinceLastAssistant
 		normalized := normalizeEvidenceText(m.Content)
 		if isControlEvidencePrompt(normalized) {
 			continue
 		}
-		if len(normalized) < 30 {
+		userSinceLastAssistant = true
+		if len(normalized) >= 30 {
+			continue
+		}
+		if m.Ordinal == firstUserOrdinal ||
+			(firstAfterAssistant &&
+				hasStaleEvidenceAssistantBefore(
+					m.Timestamp,
+					previousAssistantTimestamp,
+					hasPreviousAssistant,
+				)) {
 			content, ordinal := messageEvidence(m)
 			return content, ordinal, true
 		}
 	}
 	return "", nil, false
+}
+
+func firstSubstantiveUserOrdinal(
+	messages []SignalMessage,
+) (int, bool) {
+	for _, m := range messages {
+		if !isUserEvidenceMessage(m) {
+			continue
+		}
+		if isControlEvidencePrompt(normalizeEvidenceText(m.Content)) {
+			continue
+		}
+		return m.Ordinal, true
+	}
+	return 0, false
+}
+
+func hasStaleEvidenceAssistantBefore(
+	userTimestamp string,
+	assistantTimestamp string,
+	hasPreviousAssistant bool,
+) bool {
+	if !hasPreviousAssistant {
+		return false
+	}
+	userTime, ok := parseEvidenceTime(userTimestamp)
+	if !ok {
+		return false
+	}
+	assistantTime, ok := parseEvidenceTime(assistantTimestamp)
+	if !ok {
+		return false
+	}
+	return userTime.Sub(assistantTime) > 30*time.Minute
+}
+
+func parseEvidenceTime(raw string) (time.Time, bool) {
+	if raw == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05-07:00",
+	} {
+		t, err := time.Parse(layout, raw)
+		if err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func firstRepeatedPrompt(
