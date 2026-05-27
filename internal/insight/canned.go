@@ -61,22 +61,22 @@ var cannedTemplates = map[CannedKind]cannedTemplate{
 		ID:      "prompt_maturity_review",
 		Version: "2026-05-26",
 		Title:   "Prompt Maturity Review",
-		Focus: "Review prompt maturity using only the supplied deterministic aggregates. " +
-			"Focus on missing constraints, unclear starts, repeated asks, and verification gaps.",
+		Focus: "Review prompt maturity using only the supplied deterministic aggregates and Coach-derived prompt maturity summary. " +
+			"Focus on missing constraints, unclear starts, repeated asks, success criteria, and verification gaps.",
 	},
 	CannedContextSetupReview: {
 		ID:      "context_setup_review",
 		Version: "2026-05-26",
 		Title:   "Context Setup Review",
-		Focus: "Review context setup using only the supplied deterministic aggregates. " +
-			"Focus on context pressure, compactions, and whether sessions have usable context evidence.",
+		Focus: "Review context setup using only the supplied deterministic aggregates and Coach-derived spec/context signals. " +
+			"Focus on context pressure, compactions, spec-driven starts, and whether sessions have usable context evidence.",
 	},
 	CannedWorkflowHygieneReview: {
 		ID:      "workflow_hygiene_review",
 		Version: "2026-05-26",
 		Title:   "Workflow Hygiene Review",
-		Focus: "Review workflow hygiene using only the supplied deterministic aggregates. " +
-			"Focus on outcomes, abandonment, retries, compactions, and sessions likely needing tighter loops.",
+		Focus: "Review workflow hygiene using only the supplied deterministic aggregates and Coach-derived intent/workflow summary. " +
+			"Focus on outcomes, abandonment, retries, repeated workflows, compactions, and sessions likely needing tighter loops.",
 	},
 	CannedToolReliabilityReview: {
 		ID:      "tool_reliability_review",
@@ -96,8 +96,8 @@ var cannedTemplates = map[CannedKind]cannedTemplate{
 		ID:      "instruction_opportunity_review",
 		Version: "2026-05-26",
 		Title:   "Instruction Opportunity Review",
-		Focus: "Suggest instruction, skill, or process improvements using only the supplied deterministic aggregates. " +
-			"Label every suggestion as a draft opportunity, not a confirmed policy.",
+		Focus: "Suggest instruction, skill, or process improvements using only the supplied deterministic aggregates and Coach-derived repeated workflow clusters. " +
+			"Label every suggestion as a draft opportunity, not a confirmed policy or installed skill.",
 	},
 }
 
@@ -110,6 +110,7 @@ type CannedAggregatePayload struct {
 	Focus        string                      `json:"focus,omitempty"`
 	Signals      db.SignalsAnalyticsResponse `json:"signals"`
 	Usage        *CannedUsageSummary         `json:"usage,omitempty"`
+	Coach        *CannedCoachSummary         `json:"coach,omitempty"`
 	EvidenceRefs []CannedEvidenceRef         `json:"evidence_refs"`
 }
 
@@ -126,6 +127,49 @@ type CannedUsageSummary struct {
 type CannedEvidenceRef struct {
 	ID          string `json:"id"`
 	Description string `json:"description"`
+}
+
+// CannedCoachSummary mirrors the AI Engineer Coach insight families
+// with deterministic agentsview data. These fields are LLM inputs only;
+// they are never written back to canonical session scores or signals.
+type CannedCoachSummary struct {
+	Source             string                       `json:"source"`
+	SessionCount       int                          `json:"session_count"`
+	IntentDistribution map[string]int               `json:"intent_distribution"`
+	SpecDriven         CannedCoachSpecDriven        `json:"spec_driven"`
+	PromptMaturity     CannedCoachPromptMaturity    `json:"prompt_maturity"`
+	WorkflowClusters   []CannedCoachWorkflowCluster `json:"workflow_clusters,omitempty"`
+}
+
+type CannedCoachSpecDriven struct {
+	EligibleSessions int     `json:"eligible_sessions"`
+	Count            int     `json:"count"`
+	Rate             float64 `json:"rate"`
+}
+
+type CannedCoachPromptMaturity struct {
+	Score         int                       `json:"score"`
+	Grade         string                    `json:"grade"`
+	Dimensions    map[string]int            `json:"dimensions"`
+	IssueCounts   map[string]int            `json:"issue_counts"`
+	SamplePrompts []CannedCoachPromptSample `json:"sample_prompts,omitempty"`
+}
+
+type CannedCoachPromptSample struct {
+	SessionID string   `json:"session_id"`
+	Project   string   `json:"project"`
+	Prompt    string   `json:"prompt"`
+	Grade     string   `json:"grade"`
+	Issues    []string `json:"issues"`
+}
+
+type CannedCoachWorkflowCluster struct {
+	ID          string   `json:"id"`
+	Label       string   `json:"label"`
+	Occurrences int      `json:"occurrences"`
+	Sessions    int      `json:"sessions"`
+	Projects    []string `json:"projects"`
+	Examples    []string `json:"examples"`
 }
 
 // CannedRecommendationEnvelope is the strict model-output schema.
@@ -411,6 +455,7 @@ func NewCannedProvenance(
 		SourceVersions: map[string]string{
 			"signals_analytics": "v1",
 			"usage_analytics":   "v1",
+			"coach_insights":    "AI-Engineering-Coach-inspired.v1",
 		},
 	}, nil
 }
@@ -508,9 +553,462 @@ func shortHash(hash string) string {
 	return hash[:12]
 }
 
+func BuildCannedCoachSummary(sessions []db.Session) *CannedCoachSummary {
+	summary := &CannedCoachSummary{
+		Source:       "AI-Engineering-Coach deterministic insight model",
+		SessionCount: len(sessions),
+		IntentDistribution: map[string]int{
+			"Planning":       0,
+			"Implementation": 0,
+			"Debugging":      0,
+			"Review":         0,
+			"Exploration":    0,
+		},
+	}
+	if len(sessions) == 0 {
+		summary.PromptMaturity = emptyCoachPromptMaturity()
+		return summary
+	}
+
+	var dimensionSums coachPromptDimensions
+	issueCounts := make(map[string]int)
+	var scoredPrompts int
+	var samples []CannedCoachPromptSample
+	for _, s := range sessions {
+		prompt := firstPromptText(s)
+		if prompt == "" {
+			continue
+		}
+		summary.IntentDistribution[classifyCoachIntent(prompt, s)]++
+		if s.UserMessageCount >= 3 {
+			summary.SpecDriven.EligibleSessions++
+			if isCoachSpecDriven(prompt) ||
+				(s.QualitySignalVersion > 0 && !s.UnstructuredStart &&
+					s.MissingSuccessCriteriaCount == 0) {
+				summary.SpecDriven.Count++
+			}
+		}
+		score := gradeCoachPrompt(prompt, s)
+		dimensionSums.add(score.dimensions)
+		for _, issue := range score.issues {
+			issueCounts[issue]++
+		}
+		scoredPrompts++
+		if len(samples) < 8 && len(score.issues) > 0 {
+			samples = append(samples, CannedCoachPromptSample{
+				SessionID: s.ID,
+				Project:   s.Project,
+				Prompt:    truncateRunes(prompt, 240),
+				Grade:     scoreToCoachGrade(score.total),
+				Issues:    score.issues,
+			})
+		}
+	}
+
+	if summary.SpecDriven.EligibleSessions > 0 {
+		summary.SpecDriven.Rate = round1(
+			float64(summary.SpecDriven.Count) /
+				float64(summary.SpecDriven.EligibleSessions) *
+				100,
+		)
+	}
+	summary.PromptMaturity = buildCoachPromptMaturity(
+		dimensionSums, issueCounts, samples, scoredPrompts,
+	)
+	summary.WorkflowClusters = buildCoachWorkflowClusters(sessions)
+	return summary
+}
+
+type coachPromptDimensions struct {
+	constraints       int
+	successCriteria   int
+	verificationSteps int
+	contextProvision  int
+	specificity       int
+}
+
+type coachPromptScore struct {
+	dimensions coachPromptDimensions
+	total      int
+	issues     []string
+}
+
+func (d *coachPromptDimensions) add(other coachPromptDimensions) {
+	d.constraints += other.constraints
+	d.successCriteria += other.successCriteria
+	d.verificationSteps += other.verificationSteps
+	d.contextProvision += other.contextProvision
+	d.specificity += other.specificity
+}
+
+func emptyCoachPromptMaturity() CannedCoachPromptMaturity {
+	return CannedCoachPromptMaturity{
+		Score:       0,
+		Grade:       "F",
+		Dimensions:  emptyCoachDimensions(),
+		IssueCounts: map[string]int{},
+	}
+}
+
+func buildCoachPromptMaturity(
+	sums coachPromptDimensions,
+	issueCounts map[string]int,
+	samples []CannedCoachPromptSample,
+	count int,
+) CannedCoachPromptMaturity {
+	if count == 0 {
+		return emptyCoachPromptMaturity()
+	}
+	dims := map[string]int{
+		"constraints":        sums.constraints / count,
+		"success_criteria":   sums.successCriteria / count,
+		"verification_steps": sums.verificationSteps / count,
+		"context_provision":  sums.contextProvision / count,
+		"specificity":        sums.specificity / count,
+	}
+	total := 0
+	for _, v := range dims {
+		total += v
+	}
+	score := total / len(dims)
+	return CannedCoachPromptMaturity{
+		Score:         score,
+		Grade:         scoreToCoachGrade(score),
+		Dimensions:    dims,
+		IssueCounts:   issueCounts,
+		SamplePrompts: samples,
+	}
+}
+
+func emptyCoachDimensions() map[string]int {
+	return map[string]int{
+		"constraints":        0,
+		"success_criteria":   0,
+		"verification_steps": 0,
+		"context_provision":  0,
+		"specificity":        0,
+	}
+}
+
+func gradeCoachPrompt(msg string, s db.Session) coachPromptScore {
+	msg = strings.TrimSpace(msg)
+	var issues []string
+	dims := coachPromptDimensions{}
+	lower := strings.ToLower(msg)
+	if containsAny(lower, []string{"must", "should", "shall", "only", "no more than", "at most", "at least", "limit", "constraint", "require", "restrict"}) {
+		dims.constraints = 100
+	} else {
+		issues = append(issues, "No constraints specified")
+	}
+	if containsAny(lower, []string{"expect", "success", "criteria", "acceptance", "should return", "should output", "output should", "result should"}) {
+		dims.successCriteria = 100
+	} else {
+		issues = append(issues, "No success criteria")
+	}
+	if containsAny(lower, []string{"test", "verify", "validate", "check", "confirm", "ensure", "assert", "prove"}) {
+		dims.verificationSteps = 100
+	} else {
+		issues = append(issues, "No verification steps")
+	}
+	if s.HasContextData || s.HasToolCalls ||
+		(s.QualitySignalVersion > 0 && s.NoCodeContextCount == 0) {
+		dims.contextProvision += 50
+	}
+	if strings.Contains(msg, "`") || strings.Contains(msg, "\n") {
+		dims.contextProvision += 30
+	}
+	if strings.Count(msg, "\n") >= 2 {
+		dims.contextProvision += 20
+	}
+	if dims.contextProvision == 0 {
+		issues = append(issues, "No context provided")
+	}
+	if len([]rune(msg)) >= 100 {
+		dims.specificity += 40
+	} else if len([]rune(msg)) >= 50 {
+		dims.specificity += 20
+	}
+	if strings.Contains(msg, "\n- ") || strings.Contains(msg, "\n* ") {
+		dims.specificity += 30
+	}
+	if strings.Count(msg, "\n") >= 3 {
+		dims.specificity += 30
+	}
+	if dims.specificity == 0 {
+		issues = append(issues, "Very short or vague prompt")
+	}
+	if dims.contextProvision > 100 {
+		dims.contextProvision = 100
+	}
+	if dims.specificity > 100 {
+		dims.specificity = 100
+	}
+	total := (dims.constraints + dims.successCriteria +
+		dims.verificationSteps + dims.contextProvision +
+		dims.specificity) / 5
+	return coachPromptScore{dimensions: dims, total: total, issues: issues}
+}
+
+func classifyCoachIntent(prompt string, s db.Session) string {
+	lower := strings.ToLower(prompt)
+	scores := map[string]int{
+		"Planning":       0,
+		"Implementation": 0,
+		"Debugging":      0,
+		"Review":         0,
+		"Exploration":    0,
+	}
+	if containsAny(lower, []string{"plan", "architect", "design", "outline", "approach", "strategy", "scope", "breakdown", "roadmap", "rfc", "spec", "proposal"}) {
+		scores["Planning"]++
+	}
+	if containsAny(lower, []string{"fix", "bug", "error", "exception", "crash", "debug", "stacktrace", "trace", "issue", "broken", "fail", "wrong", "not working", "panic"}) || s.ToolFailureSignalCount > 0 {
+		scores["Debugging"]++
+	}
+	if containsAny(lower, []string{"review", "explain", "understand", "what does", "how does", "walk me through", "read", "audit", "analyze", "inspect", "clarify", "describe"}) {
+		scores["Review"]++
+	}
+	if containsAny(lower, []string{"how to", "what is", "can i", "learn", "explore", "example", "tutorial", "demo", "try", "experiment", "compare", "research", "playground"}) {
+		scores["Exploration"]++
+	}
+	if s.EditChurnCount > 0 || s.HasToolCalls ||
+		containsAny(lower, []string{"add", "implement", "build", "create", "refactor", "test", "update"}) {
+		scores["Implementation"]++
+	}
+
+	best := "Implementation"
+	bestScore := -1
+	for _, key := range []string{"Planning", "Implementation", "Debugging", "Review", "Exploration"} {
+		if scores[key] > bestScore {
+			best = key
+			bestScore = scores[key]
+		}
+	}
+	return best
+}
+
+func isCoachSpecDriven(prompt string) bool {
+	lower := strings.ToLower(prompt)
+	if containsAny(lower, []string{"spec", "requirements", "requirement", "acceptance criteria", "design doc", "prd", "rfc", "plan file", "constraint", "must", "should", "ensure"}) {
+		return true
+	}
+	lines := strings.Split(prompt, "\n")
+	nonEmpty := 0
+	hasStructured := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		nonEmpty++
+		if strings.HasPrefix(line, "- ") ||
+			strings.HasPrefix(line, "* ") ||
+			startsWithNumberedList(line) ||
+			strings.HasPrefix(line, "#") {
+			hasStructured = true
+		}
+	}
+	return hasStructured && nonEmpty >= 3
+}
+
+func buildCoachWorkflowClusters(sessions []db.Session) []CannedCoachWorkflowCluster {
+	type rec struct {
+		sessionID string
+		project   string
+		text      string
+		norm      string
+		tokens    []string
+	}
+	buckets := make(map[string][]rec)
+	for _, s := range sessions {
+		text := firstPromptText(s)
+		if len([]rune(text)) < 15 || isCoachPromptNoise(text) {
+			continue
+		}
+		norm := normalizeCoachPrompt(text)
+		tokens := tokenizeCoachPrompt(norm)
+		if len(tokens) < 2 {
+			continue
+		}
+		sort.Strings(tokens)
+		keyTokens := tokens
+		if len(keyTokens) > 4 {
+			keyTokens = keyTokens[:4]
+		}
+		key := strings.Join(keyTokens, "|")
+		buckets[key] = append(buckets[key], rec{
+			sessionID: s.ID,
+			project:   s.Project,
+			text:      text,
+			norm:      norm,
+			tokens:    tokens,
+		})
+	}
+
+	var clusters []CannedCoachWorkflowCluster
+	for _, members := range buckets {
+		if len(members) < 3 {
+			continue
+		}
+		sort.Slice(members, func(i, j int) bool {
+			return len(members[i].text) < len(members[j].text)
+		})
+		label := members[0].text
+		for _, member := range members {
+			if len([]rune(member.text)) >= 20 {
+				label = member.text
+				break
+			}
+		}
+		projects := make(map[string]bool)
+		sessionIDs := make(map[string]bool)
+		seenExamples := make(map[string]bool)
+		var examples []string
+		for _, member := range members {
+			projects[member.project] = true
+			sessionIDs[member.sessionID] = true
+			if !seenExamples[member.norm] && len(examples) < 5 {
+				seenExamples[member.norm] = true
+				examples = append(examples, truncateRunes(member.text, 150))
+			}
+		}
+		clusters = append(clusters, CannedCoachWorkflowCluster{
+			ID:          fmt.Sprintf("coach-workflow-%d", len(clusters)),
+			Label:       truncateRunes(label, 100),
+			Occurrences: len(members),
+			Sessions:    len(sessionIDs),
+			Projects:    sortedKeys(projects),
+			Examples:    examples,
+		})
+	}
+	sort.Slice(clusters, func(i, j int) bool {
+		if clusters[i].Occurrences != clusters[j].Occurrences {
+			return clusters[i].Occurrences > clusters[j].Occurrences
+		}
+		return clusters[i].Label < clusters[j].Label
+	})
+	if len(clusters) > 10 {
+		clusters = clusters[:10]
+	}
+	return clusters
+}
+
+func firstPromptText(s db.Session) string {
+	if s.FirstMessage == nil {
+		return ""
+	}
+	return strings.TrimSpace(*s.FirstMessage)
+}
+
+func normalizeCoachPrompt(raw string) string {
+	lower := strings.ToLower(raw)
+	parts := strings.FieldsFunc(lower, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z')
+	})
+	return strings.Join(parts, " ")
+}
+
+func tokenizeCoachPrompt(normalized string) []string {
+	stop := map[string]bool{
+		"the": true, "a": true, "an": true, "is": true,
+		"are": true, "was": true, "were": true, "be": true,
+		"have": true, "has": true, "had": true, "do": true,
+		"does": true, "did": true, "will": true, "would": true,
+		"could": true, "should": true, "can": true, "to": true,
+		"of": true, "in": true, "for": true, "on": true,
+		"with": true, "at": true, "by": true, "from": true,
+		"it": true, "this": true, "that": true, "my": true,
+		"me": true, "i": true, "we": true, "you": true,
+		"and": true, "or": true, "but": true, "not": true,
+		"if": true, "then": true, "so": true, "just": true,
+		"please": true, "also": true, "make": true,
+		"sure": true, "want": true, "need": true,
+		"like": true,
+	}
+	var out []string
+	for _, token := range strings.Fields(normalized) {
+		if len(token) > 1 && !stop[token] {
+			out = append(out, token)
+		}
+	}
+	return out
+}
+
+func isCoachPromptNoise(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if len([]rune(lower)) > 2000 {
+		return true
+	}
+	switch lower {
+	case "y", "n", "yes", "no", "continue", "try again", "retry", "stop", "abort":
+		return true
+	}
+	return strings.Contains(lower, "continue to iterate") &&
+		len([]rune(lower)) < 80
+}
+
+func startsWithNumberedList(line string) bool {
+	i := 0
+	for i < len(line) && line[i] >= '0' && line[i] <= '9' {
+		i++
+	}
+	return i > 0 && i+1 < len(line) &&
+		(line[i] == '.' || line[i] == ')') && line[i+1] == ' '
+}
+
+func containsAny(s string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func scoreToCoachGrade(score int) string {
+	switch {
+	case score >= 80:
+		return "A"
+	case score >= 60:
+		return "B"
+	case score >= 40:
+		return "C"
+	case score >= 20:
+		return "D"
+	default:
+		return "F"
+	}
+}
+
+func sortedKeys(values map[string]bool) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func truncateRunes(s string, maxRunes int) string {
+	runes := []rune(strings.TrimSpace(s))
+	if len(runes) <= maxRunes {
+		return string(runes)
+	}
+	return string(runes[:maxRunes-3]) + "..."
+}
+
+func round1(v float64) float64 {
+	if v >= 0 {
+		return float64(int(v*10+0.5)) / 10
+	}
+	return float64(int(v*10-0.5)) / 10
+}
+
 func CannedEvidenceRefs(
 	signals db.SignalsAnalyticsResponse,
 	usage *CannedUsageSummary,
+	coach *CannedCoachSummary,
 ) []CannedEvidenceRef {
 	refs := []CannedEvidenceRef{
 		{ID: "signals:score_distribution", Description: "Scored, unscored, average health score, and grade distribution."},
@@ -531,7 +1029,18 @@ func CannedEvidenceRefs(
 			refs = append(refs, CannedEvidenceRef{ID: "usage:top_sessions_by_cost", Description: "Deterministic top sessions by cost."})
 		}
 	}
-	if signals.ScoredSessions == 0 && signals.UnscoredSessions == 0 {
+	if coach != nil && coach.SessionCount > 0 {
+		refs = append(refs,
+			CannedEvidenceRef{ID: "coach:intent_distribution", Description: "AI Engineer Coach-style deterministic intent classification."},
+			CannedEvidenceRef{ID: "coach:prompt_maturity", Description: "AI Engineer Coach-style prompt maturity dimensions and issue counts."},
+			CannedEvidenceRef{ID: "coach:spec_driven", Description: "AI Engineer Coach-style spec-driven start rate."},
+		)
+		if len(coach.WorkflowClusters) > 0 {
+			refs = append(refs, CannedEvidenceRef{ID: "coach:workflow_clusters", Description: "AI Engineer Coach-style repeated workflow clusters for skill or instruction opportunities."})
+		}
+	}
+	if signals.ScoredSessions == 0 && signals.UnscoredSessions == 0 &&
+		(coach == nil || coach.SessionCount == 0) {
 		return []CannedEvidenceRef{{ID: "aggregate:empty", Description: "No deterministic aggregate rows matched the selected filters."}}
 	}
 	sort.Slice(refs, func(i, j int) bool { return refs[i].ID < refs[j].ID })

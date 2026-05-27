@@ -303,3 +303,89 @@ func TestBuildCannedPromptIncludesBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCannedCoachSummaryUsesCoachInsightFamilies(t *testing.T) {
+	releasePrompt := "Generate release notes for the current build and verify changelog links"
+	sessions := []db.Session{
+		{
+			ID:               "s1",
+			Project:          "app",
+			FirstMessage:     &releasePrompt,
+			UserMessageCount: 3,
+			HasToolCalls:     true,
+		},
+		{
+			ID:               "s2",
+			Project:          "app",
+			FirstMessage:     &releasePrompt,
+			UserMessageCount: 3,
+			HasToolCalls:     true,
+		},
+		{
+			ID:               "s3",
+			Project:          "app",
+			FirstMessage:     &releasePrompt,
+			UserMessageCount: 3,
+			HasToolCalls:     true,
+		},
+		{
+			ID:               "s4",
+			Project:          "api",
+			FirstMessage:     new("Plan the auth migration with acceptance criteria and tests"),
+			UserMessageCount: 4,
+			HasContextData:   true,
+		},
+	}
+
+	summary := BuildCannedCoachSummary(sessions)
+
+	if summary.Source == "" || summary.SessionCount != len(sessions) {
+		t.Fatalf("unexpected summary header: %+v", summary)
+	}
+	if summary.IntentDistribution["Planning"] == 0 ||
+		summary.IntentDistribution["Implementation"] == 0 {
+		t.Fatalf("missing Coach intent buckets: %+v", summary.IntentDistribution)
+	}
+	if summary.SpecDriven.Count == 0 || summary.SpecDriven.Rate <= 0 {
+		t.Fatalf("missing spec-driven summary: %+v", summary.SpecDriven)
+	}
+	if summary.PromptMaturity.Score == 0 ||
+		summary.PromptMaturity.Dimensions["verification_steps"] == 0 {
+		t.Fatalf("missing prompt maturity summary: %+v", summary.PromptMaturity)
+	}
+	if len(summary.WorkflowClusters) != 1 {
+		t.Fatalf("WorkflowClusters len = %d, want 1: %+v",
+			len(summary.WorkflowClusters), summary.WorkflowClusters)
+	}
+	cluster := summary.WorkflowClusters[0]
+	if cluster.Occurrences != 3 || cluster.Sessions != 3 ||
+		!strings.Contains(cluster.Label, "Generate release notes") {
+		t.Fatalf("unexpected workflow cluster: %+v", cluster)
+	}
+}
+
+func TestCannedEvidenceRefsIncludesCoachSummary(t *testing.T) {
+	coach := &CannedCoachSummary{
+		SessionCount: 3,
+		WorkflowClusters: []CannedCoachWorkflowCluster{
+			{ID: "coach-workflow-0", Label: "Generate release notes"},
+		},
+	}
+
+	refs := CannedEvidenceRefs(db.SignalsAnalyticsResponse{}, nil, coach)
+	var ids []string
+	for _, ref := range refs {
+		ids = append(ids, ref.ID)
+	}
+	joined := strings.Join(ids, ",")
+	for _, want := range []string{
+		"coach:intent_distribution",
+		"coach:prompt_maturity",
+		"coach:spec_driven",
+		"coach:workflow_clusters",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("refs missing %s: %v", want, ids)
+		}
+	}
+}

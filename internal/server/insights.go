@@ -348,6 +348,18 @@ func (s *Server) buildCannedPayload(
 		CacheSavings:        usageResult.Totals.CacheSavings,
 		TopSessionsByCost:   topSessions,
 	}
+	sessionPage, err := s.db.ListSessions(ctx, db.SessionFilter{
+		DateFrom:         req.DateFrom,
+		DateTo:           req.DateTo,
+		Project:          req.Project,
+		ExcludeOneShot:   true,
+		ExcludeAutomated: true,
+		Limit:            db.MaxSessionLimit,
+	})
+	if err != nil {
+		return insight.CannedAggregatePayload{}, "", "", err
+	}
+	coachSummary := insight.BuildCannedCoachSummary(sessionPage.Sessions)
 
 	payload := insight.CannedAggregatePayload{
 		Kind:     kind,
@@ -357,9 +369,10 @@ func (s *Server) buildCannedPayload(
 		Focus:    req.Prompt,
 		Signals:  signals,
 		Usage:    usageSummary,
+		Coach:    coachSummary,
 	}
 	payload.EvidenceRefs = insight.CannedEvidenceRefs(
-		signals, usageSummary,
+		signals, usageSummary, coachSummary,
 	)
 
 	aggregateHash, err := insight.CannedAggregateHash(payload)
