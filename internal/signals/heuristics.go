@@ -369,7 +369,7 @@ func hasRunawayToolLoop(calls []ToolCallRow) bool {
 	if len(calls) < 12 {
 		return false
 	}
-	if hasRepeatedExactToolRun(calls, 5) {
+	if hasRepeatedFailingExactToolRun(calls, 5, 3) {
 		return true
 	}
 	for start := 0; start+12 <= len(calls); start++ {
@@ -378,24 +378,38 @@ func hasRunawayToolLoop(calls []ToolCallRow) bool {
 			return true
 		}
 		if dominantToolSignatureCount(window) >= 10 &&
-			(countWindowFailures(window) >= 3 ||
-				maxExactToolCount(window) >= 5) {
+			countWindowFailures(window) >= 3 {
 			return true
 		}
 	}
 	return false
 }
 
-func hasRepeatedExactToolRun(calls []ToolCallRow, threshold int) bool {
+func hasRepeatedFailingExactToolRun(
+	calls []ToolCallRow,
+	threshold int,
+	failureThreshold int,
+) bool {
 	run := 1
+	failures := 0
+	if len(calls) > 0 && IsFailure(calls[0]) {
+		failures = 1
+	}
 	for i := 1; i < len(calls); i++ {
 		if toolSignature(calls[i]) == toolSignature(calls[i-1]) {
 			run++
-			if run >= threshold {
+			if IsFailure(calls[i]) {
+				failures++
+			}
+			if run >= threshold && failures >= failureThreshold {
 				return true
 			}
 		} else {
 			run = 1
+			failures = 0
+			if IsFailure(calls[i]) {
+				failures = 1
+			}
 		}
 	}
 	return false
@@ -416,19 +430,6 @@ func dominantToolSignatureCount(calls []ToolCallRow) int {
 	maxCount := 0
 	for _, c := range calls {
 		sig := commandClass(c)
-		counts[sig]++
-		if counts[sig] > maxCount {
-			maxCount = counts[sig]
-		}
-	}
-	return maxCount
-}
-
-func maxExactToolCount(calls []ToolCallRow) int {
-	counts := map[string]int{}
-	maxCount := 0
-	for _, c := range calls {
-		sig := toolSignature(c)
 		counts[sig]++
 		if counts[sig] > maxCount {
 			maxCount = counts[sig]

@@ -186,7 +186,7 @@ func applyHeuristicPenalties(
 		penalties["code_task_without_context"] = 4
 	}
 	if p := capPenalty(s.RunawayToolLoopCount*5, 5); p > 0 {
-		penalties["runaway_loop"] = p
+		penalties["repeated_failing_tool_cycles"] = p
 	}
 }
 

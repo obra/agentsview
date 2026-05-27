@@ -204,18 +204,37 @@ func TestAnalyzeHeuristics_CodeContext(t *testing.T) {
 }
 
 func TestAnalyzeHeuristics_RunawayToolLoop(t *testing.T) {
-	t.Run("repeated exact calls", func(t *testing.T) {
+	t.Run("repeated failing exact calls", func(t *testing.T) {
 		calls := make([]ToolCallRow, 12)
 		for i := range calls {
 			calls[i] = ToolCallRow{
-				Category:  "Bash",
-				ToolName:  "Bash",
-				InputJSON: `{"command":"npm test"}`,
+				Category:      "Bash",
+				ToolName:      "Bash",
+				InputJSON:     `{"command":"npm test"}`,
+				EventStatus:   "errored",
+				ResultContent: "exit status 1\nFAIL",
 			}
 		}
 		got := AnalyzeHeuristics(HeuristicInput{ToolRows: calls})
 		if got.RunawayToolLoopCount != 1 {
 			t.Fatalf("RunawayToolLoopCount = %d, want 1",
+				got.RunawayToolLoopCount)
+		}
+	})
+
+	t.Run("repeated successful harness calls are not runaway", func(t *testing.T) {
+		calls := make([]ToolCallRow, 12)
+		for i := range calls {
+			calls[i] = ToolCallRow{
+				Category:      "Bash",
+				ToolName:      "Bash",
+				InputJSON:     `{"command":"npm test"}`,
+				ResultContent: "PASS",
+			}
+		}
+		got := AnalyzeHeuristics(HeuristicInput{ToolRows: calls})
+		if got.RunawayToolLoopCount != 0 {
+			t.Fatalf("RunawayToolLoopCount = %d, want 0",
 				got.RunawayToolLoopCount)
 		}
 	})

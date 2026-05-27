@@ -72,7 +72,7 @@
     ],
     "want_penalties": {
       "tool_retries": 10,
-      "runaway_loop": 5
+      "repeated_failing_tool_cycles": 5
     }
   }
 ]

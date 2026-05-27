@@ -280,7 +280,7 @@ function workflowHygienePattern(
   const interrupted = errored + abandoned;
   const runawayDriver = signalDriver(
     "runaway_tool_loop_count",
-    "Runaway tool loops",
+    "Repeated failing tool cycles",
     totals,
     sessions,
   );
@@ -290,7 +290,7 @@ function workflowHygienePattern(
     id: "workflow_hygiene",
     title: "Workflow hygiene",
     summary:
-      "Errored, abandoned, and runaway-tool-loop sessions.",
+      "Errored, abandoned, and repeated failing tool-cycle sessions.",
     severity: severityFromRatio(affected, total),
     severityDescription: severityDescription(affected, total),
     affectedSessions: affected,

@@ -65,7 +65,7 @@ implemented behavior.
 | `unstructured_start` | `prompt_quality` | `no-spec-structure`, `no-spec-driven-development` | First user message, message count, tool/edit evidence | 6 points once | Medium | Session-level flag for multi-turn agentic/code sessions whose first prompt lacks headings, bullets, numbered steps, spec keywords, constraints, or plan language. |
 | `duplicate_prompt_count` | `prompt_quality` | `repeated-prompts` | Normalized user message content | 3 points each, cap 9 | High | Exact or near-exact repeated prompts inside one session are a strong signal of unclear progress. |
 | `no_code_context_count` | `context_quality` | `no-file-context` | User message content plus tool/edit evidence | 3 points each, cap 6 | Medium-low | Only score when code-task intent is detectable. General questions and planning conversations must be excluded. |
-| `runaway_tool_loop_count` | `workflow_hygiene` | `runaway-agent-loops` | Tool calls grouped between user turns or across session windows | 8 points each, cap 16 | High | Strongest new candidate. Gate on high tool volume and repeated/failing tool patterns so normal large edits are not penalized. |
+| `runaway_tool_loop_count` | `workflow_hygiene` | `runaway-agent-loops` | Tool calls grouped between user turns or across session windows | 5 points, cap 5 | Medium | Compatibility field name; operationally this means repeated failing tool cycles. Require repeated failures so long productive harness/model runs are not penalized. |
 
 Recommended Phase 2 total cap for all new prompt/content-derived penalties:
 20 points. This keeps the existing outcome/tool/context score dominant while
@@ -134,7 +134,7 @@ new prompt-quality signals are calibrated.
 | `profanity` | prompt-quality | `prompt_quality` | `hostile_language_count` | insights | Medium | Personal tone should not reduce deterministic session score. |
 | `reasoning-effort-overuse` | tool-mastery | `cost_model_hygiene` | `high_reasoning_effort_rate` | blocked | Low | Usage events expose reasoning tokens, not requested effort setting. Keep out until effort metadata exists. |
 | `repeated-prompts` | prompt-quality | `prompt_quality` | `duplicate_prompt_count` | score | High | Normalize text and count duplicates within a session. Strong signal when repeated after assistant/tool work. |
-| `runaway-agent-loops` | session-hygiene | `workflow_hygiene` | `runaway_tool_loop_count` | score | High | Tool calls are available. Combine high tool volume with retries/failures or repeated categories. |
+| `runaway-agent-loops` | session-hygiene | `workflow_hygiene` | `runaway_tool_loop_count` | score | Medium | Tool calls are available, but duration alone is not a failure. Count only repeated failing cycles or dense failure windows. |
 | `session-drift` | session-hygiene | `workflow_hygiene` | `session_intent_drift_count` | insights | Low | Requires reliable work-type classification. Useful for insight summaries, not score. |
 | `slow-responses` | session-hygiene | `workflow_hygiene` | `slow_response_count` | blocked | Low | Request elapsed time is unavailable. Session duration is not equivalent. |
 | `speed-accept` | code-review | `tool_mastery` | `speed_accept_count` | blocked | Low | Needs AI LOC plus human review/accept timing. Not available. |

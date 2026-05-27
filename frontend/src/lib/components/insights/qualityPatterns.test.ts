@@ -161,7 +161,7 @@ describe("quality pattern transforms", () => {
     );
   });
 
-  it("surfaces runaway tool loops as workflow hygiene", () => {
+  it("surfaces repeated failing tool cycles as workflow hygiene", () => {
     const signals = makeSignals({
       outcome_distribution: { completed: 6 },
       quality_health: {
@@ -197,7 +197,7 @@ describe("quality pattern transforms", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: "runaway_tool_loop_count",
-          label: "Runaway tool loops",
+          label: "Repeated failing tool cycles",
           total: 2,
           sessions: 2,
         }),

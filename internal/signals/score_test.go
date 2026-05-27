@@ -348,7 +348,7 @@ func TestComputeHealthScore(t *testing.T) {
 				"missing_verification_language": 1,
 				"repeated_prompts":              4,
 				"code_task_without_context":     4,
-				"runaway_loop":                  5,
+				"repeated_failing_tool_cycles":  5,
 			},
 		},
 	}
