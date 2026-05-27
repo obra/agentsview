@@ -183,16 +183,15 @@ func (db *DB) BackfillSignals(
 			"probing signals backfill marker: %w", err,
 		)
 	}
-	if done > 0 {
-		db.mu.Unlock()
-		return nil
-	}
 	db.mu.Unlock()
 
-	log.Println("backfill: computing session signals...")
-
-	rows, err := db.getReader().QueryContext(ctx,
-		`SELECT id FROM sessions WHERE message_count > 0`)
+	query := `SELECT id FROM sessions WHERE message_count > 0`
+	args := []any{}
+	if done > 0 {
+		query += ` AND quality_signal_version < ?`
+		args = append(args, CurrentQualitySignalVersion)
+	}
+	rows, err := db.getReader().QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf(
 			"querying backfill candidates: %w", err,
@@ -212,6 +211,21 @@ func (db *DB) BackfillSignals(
 	}
 	if err := rows.Err(); err != nil {
 		return err
+	}
+	if len(ids) == 0 {
+		if done == 0 {
+			return db.MarkSignalsBackfillDone()
+		}
+		return nil
+	}
+
+	if done > 0 {
+		log.Printf(
+			"backfill: recomputing %d stale session signals...",
+			len(ids),
+		)
+	} else {
+		log.Println("backfill: computing session signals...")
 	}
 
 	var failed int

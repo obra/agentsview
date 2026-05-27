@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -2619,6 +2620,32 @@ func TestBuildSignalExamplesUsesObservedOrdinal(t *testing.T) {
 					*examples[0].MessageOrdinal, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetAnalyticsSignalSessionsRejectsUnsupportedSignal(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+
+	_, err := d.GetAnalyticsSignalSessions(
+		ctx,
+		baseFilter(),
+		"not_a_signal",
+		10,
+	)
+	if !errors.Is(err, ErrUnsupportedAnalyticsSignal) {
+		t.Fatalf("err = %v, want ErrUnsupportedAnalyticsSignal", err)
+	}
+}
+
+func TestParseEvidenceTimeAcceptsPostgresUTCFormat(t *testing.T) {
+	got, ok := parseEvidenceTime("2024-06-01T12:34:56.123456Z")
+	if !ok {
+		t.Fatal("parseEvidenceTime did not accept PG UTC format")
+	}
+	if got.UTC().Format(time.RFC3339Nano) !=
+		"2024-06-01T12:34:56.123456Z" {
+		t.Fatalf("got %s", got.UTC().Format(time.RFC3339Nano))
 	}
 }
 

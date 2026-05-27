@@ -58,7 +58,7 @@ implemented behavior.
 
 | Proposed signal | Family | Coach source | Inputs available now | Initial weight guidance | Confidence | Scoring notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| `short_prompt_count` | `prompt_quality` | `lazy-prompting` | User message content length | 2 points each, cap 6 | Medium | Count non-empty user prompts under about 30 chars. Keep small because terse expert prompts can be valid. |
+| `short_prompt_count` | `prompt_quality` | `lazy-prompting` | User message content length and nearby assistant timing | 2 points each, cap 6 | Low | Count only short task starts or fresh work segments after a stale assistant response. Do not count conversational steering, acknowledgements, or short follow-ups immediately after an agent response. Keep small because terse expert prompts can be valid. |
 | `constraintless_prompt_count` | `prompt_quality` | `low-constraint-usage` | User message content | 2 points each, cap 6 | Medium | Detect explicit constraint language. Do not penalize read-only Q&A sessions unless task intent suggests implementation/debugging. |
 | `missing_success_criteria_count` | `prompt_quality` | Coach prompt maturity analyzer | User message content | 2 points each, cap 6 | Medium-low | Use as a weak prompt-quality signal only for implementation/debugging task starts. |
 | `missing_verification_count` | `prompt_quality` | Coach prompt maturity analyzer | User message content | 2 points each, cap 6 | Medium-low | Penalize only when the user is asking for code or behavior changes. |
@@ -110,7 +110,7 @@ new prompt-quality signals are calibrated.
 | `context-engineering-gaps` | prompt-quality | `context_quality` | `context_engineering_gap_summary` | insights | Medium-low | Mixed feature inventory across file refs, instructions, skills, MCP, and subagents. Several inputs are incomplete today. |
 | `copy-paste-blindness` | code-review | `tool_mastery` | `ai_loc_without_refinement_count` | blocked | Low | Needs AI-generated LOC and review/refinement evidence. Not available. |
 | `excessive-file-context` | prompt-quality | `context_quality` | `excessive_file_context_rate` | aggregate | Low | Requires structured referenced-file counts. Tool read/search calls are only a weak proxy and should not score. |
-| `frustration-signals` | prompt-quality | `prompt_quality` | `frustration_prompt_count` | insights | Medium | Useful for insight copy but not a quality penalty. |
+| `frustration-signals` | prompt-quality | `prompt_quality` | `frustration_marker_count` | insights | Medium | Useful as a "session may be going badly" marker for drilldowns and generated insight copy, but not a deterministic score penalty. Tune for precision over recall. Strip code/log blocks, ignore ordinary emphasis, and treat profanity/caps as contextual evidence rather than proof. |
 | `high-cancellation` | session-hygiene | `workflow_hygiene` | `request_cancellation_rate` | blocked | Low | Explicit request cancellation is unavailable. Tool cancellation remains covered by failure signals. |
 | `instruction-bloat` | prompt-quality | `context_quality` | `instruction_context_bytes` | aggregate | Low | Needs reliable custom/system instruction extraction by source. Avoid per-session score. |
 | `late-night-coding` | session-hygiene | `aggregate_analytics` | `late_night_session_rate` | aggregate | High | Timestamps are available. This is a work-pattern insight, not a session-quality penalty. |
@@ -190,3 +190,19 @@ per-session scoring.
 6. When parser changes introduce new required fields, follow the repository data
    safety rule: full resync through a fresh database, orphan session copy, and
    atomic swap; do not delete or recreate the persistent archive in place.
+
+## Current Weak Signal Semantics
+
+Some Coach-derived prompt signals are intentionally weak and should be used as
+evidence pivots, not as standalone conclusions:
+
+- `short_prompt_count` means a short task-start or fresh work-segment prompt.
+  It excludes controls such as "yes" and short conversational steering after a
+  recent assistant response. A short prompt can still be expert shorthand when
+  the surrounding session supplies enough context.
+- `frustration_marker_count` means a user message contains high-precision
+  frustration language after stripping fenced code/log-like payloads. It is a
+  workflow triage marker, not a user-quality or session-score penalty.
+- `runaway_tool_loop_count` means repeated failing tool cycles. Long productive
+  harness runs, model work loops, or uninterrupted agent sessions are not
+  failures by duration alone.

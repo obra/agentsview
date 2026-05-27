@@ -11,7 +11,10 @@
   import { renderMarkdown } from "../../utils/markdown.js";
   import { scoreToGrade } from "../../utils/grade.js";
   import { agentLabel } from "../../utils/agents.js";
-  import { getAnalyticsSignalSessions } from "../../api/client.js";
+  import {
+    getAnalyticsSignalSessions,
+    type AnalyticsParams,
+  } from "../../api/client.js";
   import type {
     AgentName,
     AutomatedScope,
@@ -44,6 +47,8 @@
   let signalExamples: SignalSessionExample[] = $state([]);
   let signalExamplesLoading = $state(false);
   let signalExamplesError: string | null = $state(null);
+  let signalExamplesFilterKey: string | null = $state(null);
+  let signalExamplesRequest = 0;
 
   const signals = $derived(analytics.signals);
   const summary = $derived(buildQualitySummary(signals));
@@ -162,27 +167,53 @@
     insights.load();
   }
 
+  function signalEvidenceKey(
+    signal: string,
+    params: AnalyticsParams,
+  ): string {
+    const entries = Object.entries(params)
+      .filter(([, value]) => value !== undefined && value !== "")
+      .sort(([a], [b]) => a.localeCompare(b));
+    return JSON.stringify({ signal, params: Object.fromEntries(entries) });
+  }
+
   async function openSignalEvidence(signal: string) {
+    const params = analytics.signalEvidenceParams();
+    const requestKey = signalEvidenceKey(signal, params);
+    const request = ++signalExamplesRequest;
     selectedSignalId = signal;
+    signalExamplesFilterKey = requestKey;
     signalExamplesLoading = true;
     signalExamplesError = null;
     try {
       const response = await getAnalyticsSignalSessions({
-        ...analytics.signalEvidenceParams(),
+        ...params,
         signal,
         limit: 8,
       });
-      if (selectedSignalId === signal) {
+      if (
+        selectedSignalId === signal &&
+        signalExamplesFilterKey === requestKey &&
+        signalExamplesRequest === request
+      ) {
         signalExamples = response.sessions;
       }
     } catch (err) {
-      if (selectedSignalId === signal) {
+      if (
+        selectedSignalId === signal &&
+        signalExamplesFilterKey === requestKey &&
+        signalExamplesRequest === request
+      ) {
         signalExamples = [];
         signalExamplesError =
           err instanceof Error ? err.message : "Could not load examples";
       }
     } finally {
-      if (selectedSignalId === signal) {
+      if (
+        selectedSignalId === signal &&
+        signalExamplesFilterKey === requestKey &&
+        signalExamplesRequest === request
+      ) {
         signalExamplesLoading = false;
       }
     }
@@ -308,9 +339,15 @@
   }
 
   function calibrationLabel(signal: string): string {
+    if (signal.startsWith("outcome_")) {
+      return "Outcome cohort";
+    }
     const calibration = calibrationFor(signal);
-    if (!calibration || calibration.affected_sessions === 0) {
-      return "No calibrated examples";
+    if (!calibration) {
+      return "Examples only";
+    }
+    if (calibration.affected_sessions === 0) {
+      return "No affected sessions";
     }
     if (calibration.incomplete_lift == null) {
       return `${calibration.affected_incomplete_rate}% incomplete`;
@@ -425,6 +462,17 @@
     if (refreshTimer !== undefined) clearInterval(refreshTimer);
     clearTimeout(copiedInsightLinkTimer);
     unsubEvents?.();
+  });
+
+  $effect(() => {
+    const signal = selectedSignalId;
+    if (!signal) return;
+    const params = analytics.signalEvidenceParams();
+    const nextKey = signalEvidenceKey(signal, params);
+    if (signalExamplesFilterKey === nextKey) return;
+    signalExamples = [];
+    signalExamplesError = null;
+    untrack(() => void openSignalEvidence(signal));
   });
 
   $effect(() => {
@@ -673,6 +721,8 @@
                 onclick={() => {
                   selectedSignalId = null;
                   signalExamples = [];
+                  signalExamplesError = null;
+                  signalExamplesFilterKey = null;
                 }}
               >
                 Close

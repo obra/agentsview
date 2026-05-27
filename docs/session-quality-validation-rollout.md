@@ -48,6 +48,30 @@ reload stability. Before final rollout, add or explicitly waive these lanes:
 | Parser/source diversity | Reference tests cover multiple log sources before analyzer logic consumes them. Agentsview should ensure new quality signals are stable across the supported agents, not only Claude-shaped fixtures. | Signal fixtures from Codex, Claude, Cursor, Gemini, Kiro/OpenCode, and imported remote sessions where source formats differ. |
 | LLM insight replay boundaries | Phase 5 keeps generated insights separate from canonical scoring, but rollout should validate cache/provenance edge cases. | Tests for malformed or partial provenance, cache-hit vs fresh generation metadata, stale template versions, provider unavailable, and read-only archives. |
 
+## Signal/API Contract Checklist
+
+Every analytics signal or persisted quality-signal change must update these
+surfaces together before review:
+
+- SQLite aggregation, signal evidence queries, and example extraction.
+- PostgreSQL aggregation/evidence parity, including stable timestamp formatting
+  for frontend deep links and evidence ordering.
+- `QualitySignals` versioning plus non-destructive stale-row recompute behavior
+  for archives that already completed the legacy backfill marker.
+- Server endpoint validation. Unknown `/analytics/signal-sessions` signals
+  should return `400` instead of silently producing empty evidence.
+- Frontend API types, pattern driver ids, labels, and evidence-panel state keyed
+  by the active analytics filters.
+- Contract tests for empty data, unsupported signals, filtered evidence, and at
+  least one positive example per score-affecting signal.
+- Documentation updates in this file and the heuristic map whenever semantics,
+  confidence, or score-affecting status changes.
+
+Outcome cohorts (`outcome_errored`, `outcome_abandoned`,
+`outcome_completed`) are valid drilldown groups, but they are not calibrated
+diagnostic signals because the calibration target already includes incomplete
+outcomes.
+
 ## Calibration Report Template
 
 Run this after Phases 2-5 are finalized against a representative local archive.
