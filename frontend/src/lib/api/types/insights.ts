@@ -1,3 +1,5 @@
+import type { AutomatedScope } from "./analytics.js";
+
 export interface Insight {
   id: number;
   type: InsightType;
@@ -54,4 +56,5 @@ export interface GenerateInsightRequest {
   kind?: CannedInsightKind;
   llm_opt_in?: boolean;
   force_refresh?: boolean;
+  automated_scope?: AutomatedScope;
 }

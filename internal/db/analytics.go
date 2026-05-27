@@ -53,6 +53,7 @@ type AnalyticsFilter struct {
 	MinUserMessages  int    // user_message_count >= N
 	ExcludeOneShot   bool   // exclude sessions with user_message_count <= 1
 	ExcludeAutomated bool   // exclude automated (roborev) sessions
+	AutomatedScope   string // "", "human", "all", or "automated"
 	ActiveSince      string // ISO timestamp cutoff
 	Termination      string // "", "clean", or "unclean"
 }
@@ -210,16 +211,17 @@ func (f AnalyticsFilter) buildWhereWithDate(
 		preds = append(preds, "user_message_count >= ?")
 		args = append(args, f.MinUserMessages)
 	}
+	scope := normalizeAutomatedScope(f.AutomatedScope, f.ExcludeAutomated)
 	if f.ExcludeOneShot {
-		if !f.ExcludeAutomated {
+		if scope != "human" {
 			preds = append(preds,
 				"(user_message_count > 1 OR is_automated = 1)")
 		} else {
 			preds = append(preds, "user_message_count > 1")
 		}
 	}
-	if f.ExcludeAutomated {
-		preds = append(preds, "is_automated = 0")
+	if pred := automatedScopePredicate(scope, "is_automated"); pred != "" {
+		preds = append(preds, pred)
 	}
 
 	if f.ActiveSince != "" {
@@ -234,6 +236,28 @@ func (f AnalyticsFilter) buildWhereWithDate(
 	}
 
 	return strings.Join(preds, " AND "), args
+}
+
+func normalizeAutomatedScope(scope string, excludeAutomated bool) string {
+	switch strings.TrimSpace(scope) {
+	case "human", "all", "automated":
+		return strings.TrimSpace(scope)
+	}
+	if excludeAutomated {
+		return "human"
+	}
+	return "all"
+}
+
+func automatedScopePredicate(scope, col string) string {
+	switch scope {
+	case "human":
+		return col + " = 0"
+	case "automated":
+		return col + " = 1"
+	default:
+		return ""
+	}
 }
 
 // HasTimeFilter returns true when hour-of-day or day-of-week

@@ -10,6 +10,7 @@ export type TopSessionsMetric =
   | "messages"
   | "duration"
   | "output_tokens";
+export type AutomatedScope = "human" | "all" | "automated";
 
 export interface AgentSummary {
   sessions: number;

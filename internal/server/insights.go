@@ -22,15 +22,27 @@ var validInsightTypes = map[string]bool{
 }
 
 type generateInsightRequest struct {
-	Type         string `json:"type"`
-	DateFrom     string `json:"date_from"`
-	DateTo       string `json:"date_to"`
-	Project      string `json:"project,omitempty"`
-	Prompt       string `json:"prompt,omitempty"`
-	Agent        string `json:"agent,omitempty"`
-	Kind         string `json:"kind,omitempty"`
-	LLMOptIn     bool   `json:"llm_opt_in,omitempty"`
-	ForceRefresh bool   `json:"force_refresh,omitempty"`
+	Type           string `json:"type"`
+	DateFrom       string `json:"date_from"`
+	DateTo         string `json:"date_to"`
+	Project        string `json:"project,omitempty"`
+	Prompt         string `json:"prompt,omitempty"`
+	Agent          string `json:"agent,omitempty"`
+	Kind           string `json:"kind,omitempty"`
+	LLMOptIn       bool   `json:"llm_opt_in,omitempty"`
+	ForceRefresh   bool   `json:"force_refresh,omitempty"`
+	AutomatedScope string `json:"automated_scope,omitempty"`
+}
+
+func normalizeInsightAutomatedScope(scope string) (string, bool) {
+	switch strings.TrimSpace(scope) {
+	case "", "human":
+		return "human", true
+	case "all", "automated":
+		return strings.TrimSpace(scope), true
+	default:
+		return "", false
+	}
 }
 
 func insightGenerateClientMessage(
@@ -312,12 +324,12 @@ func (s *Server) buildCannedPayload(
 	req generateInsightRequest,
 ) (insight.CannedAggregatePayload, string, string, error) {
 	analyticsFilter := db.AnalyticsFilter{
-		From:             req.DateFrom,
-		To:               req.DateTo,
-		Project:          req.Project,
-		Timezone:         "UTC",
-		ExcludeOneShot:   true,
-		ExcludeAutomated: true,
+		From:           req.DateFrom,
+		To:             req.DateTo,
+		Project:        req.Project,
+		Timezone:       "UTC",
+		ExcludeOneShot: true,
+		AutomatedScope: req.AutomatedScope,
 	}
 	signals, err := s.db.GetAnalyticsSignals(ctx, analyticsFilter)
 	if err != nil {
@@ -325,13 +337,13 @@ func (s *Server) buildCannedPayload(
 	}
 
 	usageFilter := db.UsageFilter{
-		From:             req.DateFrom,
-		To:               req.DateTo,
-		Project:          req.Project,
-		Timezone:         "UTC",
-		ExcludeOneShot:   true,
-		ExcludeAutomated: true,
-		Breakdowns:       false,
+		From:           req.DateFrom,
+		To:             req.DateTo,
+		Project:        req.Project,
+		Timezone:       "UTC",
+		ExcludeOneShot: true,
+		AutomatedScope: req.AutomatedScope,
+		Breakdowns:     false,
 	}
 	usageResult, err := s.db.GetDailyUsage(ctx, usageFilter)
 	if err != nil {
@@ -357,14 +369,15 @@ func (s *Server) buildCannedPayload(
 	coachSummary := insight.BuildCannedCoachSummary(coachSessions)
 
 	payload := insight.CannedAggregatePayload{
-		Kind:     kind,
-		DateFrom: req.DateFrom,
-		DateTo:   req.DateTo,
-		Project:  req.Project,
-		Focus:    req.Prompt,
-		Signals:  signals,
-		Usage:    usageSummary,
-		Coach:    coachSummary,
+		Kind:           kind,
+		DateFrom:       req.DateFrom,
+		DateTo:         req.DateTo,
+		Project:        req.Project,
+		AutomatedScope: req.AutomatedScope,
+		Focus:          req.Prompt,
+		Signals:        signals,
+		Usage:          usageSummary,
+		Coach:          coachSummary,
 	}
 	payload.EvidenceRefs = insight.CannedEvidenceRefs(
 		signals, usageSummary, coachSummary,
@@ -377,6 +390,7 @@ func (s *Server) buildCannedPayload(
 	cacheKey, err := insight.CannedCacheKey(
 		kind, req.DateFrom, req.DateTo, req.Project,
 		req.Agent, req.Prompt, aggregateHash,
+		req.AutomatedScope,
 	)
 	if err != nil {
 		return insight.CannedAggregatePayload{}, "", "", err
@@ -389,12 +403,12 @@ func (s *Server) listCannedCoachSessions(
 	req generateInsightRequest,
 ) ([]db.Session, error) {
 	filter := db.SessionFilter{
-		DateFrom:         req.DateFrom,
-		DateTo:           req.DateTo,
-		Project:          req.Project,
-		ExcludeOneShot:   true,
-		ExcludeAutomated: true,
-		Limit:            db.MaxSessionLimit,
+		DateFrom:       req.DateFrom,
+		DateTo:         req.DateTo,
+		Project:        req.Project,
+		ExcludeOneShot: true,
+		AutomatedScope: req.AutomatedScope,
+		Limit:          db.MaxSessionLimit,
 	}
 	var out []db.Session
 	for {

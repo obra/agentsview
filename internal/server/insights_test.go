@@ -163,6 +163,7 @@ func TestGenerateInsight_Validation(t *testing.T) {
 		{"DateToBeforeDateFrom", `{"type":"daily_activity","date_from":"2025-01-16","date_to":"2025-01-15"}`, "date_to must be"},
 		{"InvalidJSON", `{bad json`, ""},
 		{"InvalidAgent", `{"type":"daily_activity","date_from":"2025-01-15","date_to":"2025-01-15","agent":"gpt"}`, "invalid agent"},
+		{"InvalidAutomatedScope", `{"type":"daily_activity","date_from":"2025-01-15","date_to":"2025-01-15","automated_scope":"robots"}`, "automated_scope"},
 	}
 
 	for _, tt := range tests {
@@ -426,6 +427,63 @@ func TestGenerateCannedInsight_CoachSummaryUsesAllPages(t *testing.T) {
 	if !strings.Contains(generatedPrompt, `"session_count":501`) {
 		t.Fatalf("generated prompt missing all-page Coach session count: %s",
 			generatedPrompt)
+	}
+}
+
+func TestGenerateCannedInsight_AutomatedScopeOnlyAutomated(t *testing.T) {
+	var generatedPrompt string
+	stubGen := func(
+		_ context.Context, _ string, prompt string, _ insight.LogFunc,
+	) (insight.Result, error) {
+		generatedPrompt = prompt
+		return insight.Result{
+			Agent: "claude",
+			Model: "test-model",
+			Content: `{
+				"schema_version":"llm_insight.v1",
+				"kind":"prompt_maturity_review",
+				"summary":"Automated review prompts are isolated for this recommendation.",
+				"confidence":"medium",
+				"recommendations":[{
+					"title":"Separate review automation from human work",
+					"rationale":"The Coach prompt maturity aggregate covers the selected automated scope.",
+					"actions":["Review automated sessions separately from human sessions"],
+					"evidence_refs":["coach:prompt_maturity"],
+					"impact":"medium",
+					"effort":"low"
+				}],
+				"risks":[],
+				"evidence_refs":["coach:prompt_maturity"]
+			}`,
+		}, nil
+	}
+	te := setupWithServerOpts(t, []server.Option{
+		server.WithGenerateStreamFunc(stubGen),
+	})
+	humanPrompt := "Implement the checkout fix with tests and verification"
+	te.seedSession(t, "human-session", "my-app", 4, func(s *db.Session) {
+		s.FirstMessage = &humanPrompt
+		s.UserMessageCount = 2
+	})
+	autoPrompt := "You are a code reviewer. Review the diff."
+	te.seedSession(t, "auto-session", "my-app", 2, func(s *db.Session) {
+		s.FirstMessage = &autoPrompt
+		s.UserMessageCount = 1
+		s.IsAutomated = true
+	})
+
+	w := te.post(t, "/api/v1/insights/generate",
+		`{"type":"llm_canned","kind":"prompt_maturity_review","date_from":"2025-01-15","date_to":"2025-01-15","project":"my-app","agent":"claude","llm_opt_in":true,"automated_scope":"automated"}`)
+
+	assertStatus(t, w, http.StatusOK)
+	if !strings.Contains(generatedPrompt, `"automated_scope":"automated"`) {
+		t.Fatalf("generated prompt missing automated scope: %s", generatedPrompt)
+	}
+	if !strings.Contains(generatedPrompt, `"session_count":1`) {
+		t.Fatalf("generated prompt should include only automated session: %s", generatedPrompt)
+	}
+	if strings.Contains(generatedPrompt, "human-session") {
+		t.Fatalf("generated prompt included human session: %s", generatedPrompt)
 	}
 }
 

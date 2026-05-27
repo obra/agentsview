@@ -70,6 +70,13 @@ beforeEach(() => {
   insights.selectedTaskId = null;
   insights.loading = false;
   insights.tasks = [];
+  insights.setDateFrom("2025-01-15");
+  insights.setDateTo("2025-01-15");
+  insights.setType("daily_activity");
+  insights.setCannedKind("prompt_maturity_review");
+  insights.setProject("");
+  insights.setAgent("claude");
+  insights.setAutomatedScope("human");
   insights.promptText = "";
 });
 
@@ -307,6 +314,7 @@ describe("generate (multi-task)", () => {
         kind: "tool_reliability_review",
         llm_opt_in: true,
         prompt: "Focus on retries",
+        automated_scope: "human",
       }),
       expect.any(Function),
       expect.any(Function),
@@ -370,6 +378,61 @@ describe("generate (multi-task)", () => {
       insights.tasks[0]!.clientId,
     );
     expect(insights.selectedId).toBeNull();
+  });
+
+  it("retries a failed task with its original request", async () => {
+    const retriedInsight = makeInsight({ id: 77 });
+    vi.mocked(api.generateInsight)
+      .mockReturnValueOnce({
+        abort: vi.fn(),
+        done: Promise.reject(new Error("validation failed")),
+      })
+      .mockReturnValueOnce({
+        abort: vi.fn(),
+        done: Promise.resolve(retriedInsight),
+      });
+
+    insights.setType("llm_canned");
+    insights.setCannedKind("model_cost_review");
+    insights.setDateFrom("2025-01-01");
+    insights.setDateTo("2025-01-31");
+    insights.setProject("middleman");
+    insights.setAgent("codex");
+    insights.setAutomatedScope("automated");
+    insights.promptText = "Focus on cache misses";
+
+    insights.generate();
+    await new Promise((r) => setTimeout(r, 0));
+
+    const failedTask = insights.tasks[0]!;
+    expect(failedTask.status).toBe("error");
+
+    insights.promptText = "A different current focus";
+    insights.retryTask(failedTask.clientId);
+
+    expect(insights.tasks).toHaveLength(1);
+    expect(insights.tasks[0]!.clientId).toBe(failedTask.clientId);
+    expect(insights.tasks[0]!.status).toBe("generating");
+    expect(api.generateInsight).toHaveBeenLastCalledWith(
+      {
+        type: "llm_canned",
+        date_from: "2025-01-01",
+        date_to: "2025-01-31",
+        project: "middleman",
+        prompt: "Focus on cache misses",
+        agent: "codex",
+        kind: "model_cost_review",
+        llm_opt_in: true,
+        automated_scope: "automated",
+      },
+      expect.any(Function),
+      expect.any(Function),
+    );
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(insights.tasks).toHaveLength(0);
+    expect(insights.items[0]).toEqual(retriedInsight);
   });
 
   it("captures streaming logs per task", async () => {

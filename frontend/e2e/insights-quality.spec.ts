@@ -34,7 +34,14 @@ test.describe("Insights quality rollout", () => {
       route.fulfill({ json: { projects: [] } }),
     );
     await page.route("**/api/v1/agents*", (route) =>
-      route.fulfill({ json: { agents: ["claude", "codex"] } }),
+      route.fulfill({
+        json: {
+          agents: [
+            { name: "claude", session_count: 8 },
+            { name: "codex", session_count: 5 },
+          ],
+        },
+      }),
     );
     await page.route("**/api/v1/sessions*", (route) =>
       route.fulfill({ json: { sessions: [], total: 0 } }),
@@ -186,5 +193,65 @@ test.describe("Insights quality rollout", () => {
       "Generation is disabled in read-only mode",
     );
     await expect(generate).toBeDisabled();
+  });
+
+  test("retries failed generated insight tasks", async ({ page }) => {
+    let generateCalls = 0;
+    await page.route("**/api/v1/version", (route) =>
+      route.fulfill({
+        json: { version: "test", commit: "test", read_only: false },
+      }),
+    );
+    await page.route("**/api/v1/insights", (route) =>
+      route.fulfill({ json: { insights: [] } }),
+    );
+    await page.route("**/api/v1/insights/generate", (route) => {
+      generateCalls += 1;
+      if (generateCalls === 1) {
+        return route.fulfill({
+          contentType: "text/event-stream",
+          body: [
+            "event: error",
+            'data: {"message":"generated insight failed validation: unknown envelope evidence_ref: usage:cache_behavior"}',
+            "",
+            "",
+          ].join("\n"),
+        });
+      }
+      return route.fulfill({
+        contentType: "text/event-stream",
+        body: [
+          "event: done",
+          `data: ${JSON.stringify({
+            ...cannedInsight,
+            id: 43,
+            kind: "model_cost_review",
+            template_id: "model_cost_review",
+          })}`,
+          "",
+          "",
+        ].join("\n"),
+      });
+    });
+
+    await page.goto("/insights");
+
+    const archive = page.getByRole("region", {
+      name: "Generated Insights Archive",
+    });
+    await archive.getByTitle("Select template").click();
+    await archive.getByRole("option", { name: "Model and Cost" }).click();
+    await archive.getByRole("button", { name: "Generate" }).click();
+
+    await expect(
+      archive.getByText("generated insight failed validation"),
+    ).toBeVisible();
+
+    await archive.getByRole("button", { name: "Retry" }).click();
+
+    await expect(
+      archive.getByRole("button", { name: /Model and Cost global/ }),
+    ).toBeVisible();
+    expect(generateCalls).toBe(2);
   });
 });

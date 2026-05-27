@@ -103,15 +103,16 @@ var cannedTemplates = map[CannedKind]cannedTemplate{
 
 // CannedAggregatePayload is the deterministic input sent to the LLM.
 type CannedAggregatePayload struct {
-	Kind         CannedKind                  `json:"kind"`
-	DateFrom     string                      `json:"date_from"`
-	DateTo       string                      `json:"date_to"`
-	Project      string                      `json:"project,omitempty"`
-	Focus        string                      `json:"focus,omitempty"`
-	Signals      db.SignalsAnalyticsResponse `json:"signals"`
-	Usage        *CannedUsageSummary         `json:"usage,omitempty"`
-	Coach        *CannedCoachSummary         `json:"coach,omitempty"`
-	EvidenceRefs []CannedEvidenceRef         `json:"evidence_refs"`
+	Kind           CannedKind                  `json:"kind"`
+	DateFrom       string                      `json:"date_from"`
+	DateTo         string                      `json:"date_to"`
+	Project        string                      `json:"project,omitempty"`
+	AutomatedScope string                      `json:"automated_scope"`
+	Focus          string                      `json:"focus,omitempty"`
+	Signals        db.SignalsAnalyticsResponse `json:"signals"`
+	Usage          *CannedUsageSummary         `json:"usage,omitempty"`
+	Coach          *CannedCoachSummary         `json:"coach,omitempty"`
+	EvidenceRefs   []CannedEvidenceRef         `json:"evidence_refs"`
 }
 
 type CannedUsageSummary struct {
@@ -236,6 +237,7 @@ func CannedAggregateHash(payload CannedAggregatePayload) (string, error) {
 func CannedCacheKey(
 	kind CannedKind,
 	dateFrom, dateTo, project, requestedAgent, focus, aggregateHash string,
+	automatedScope string,
 ) (string, error) {
 	t, ok := CannedTemplate(kind)
 	if !ok {
@@ -252,6 +254,7 @@ func CannedCacheKey(
 		"schema_version":   CannedSchemaVersion,
 		"aggregate_hash":   aggregateHash,
 		"focus_hash":       hex.EncodeToString(focusSum[:]),
+		"automated_scope":  automatedScope,
 	}
 	data, err := canonicalJSON(input)
 	if err != nil {
@@ -460,7 +463,8 @@ func NewCannedProvenance(
 		DateTo:          payload.DateTo,
 		Project:         payload.Project,
 		Filters: map[string]string{
-			"project": payload.Project,
+			"project":         payload.Project,
+			"automated_scope": payload.AutomatedScope,
 		},
 		Agent: agent,
 		Model: model,

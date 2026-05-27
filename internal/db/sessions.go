@@ -411,6 +411,7 @@ type SessionFilter struct {
 	MinUserMessages  int      // user_message_count >= N (0 = no filter)
 	ExcludeOneShot   bool     // exclude sessions with user_message_count <= 1
 	ExcludeAutomated bool     // exclude sessions where is_automated = 1
+	AutomatedScope   string   // "", "human", "all", or "automated"
 	IncludeChildren  bool     // include subagent sessions (for sidebar grouping)
 	IncludeOrphans   bool     // promote orphan child rows to sidebar roots
 	Outcome          []string // filter by outcome values

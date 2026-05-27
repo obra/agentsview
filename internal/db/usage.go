@@ -35,6 +35,7 @@ type UsageFilter struct {
 	MinUserMessages  int    // user_message_count >= N
 	ExcludeOneShot   bool   // user_message_count > 1
 	ExcludeAutomated bool   // is_automated = false
+	AutomatedScope   string // "", "human", "all", or "automated"
 	ActiveSince      string // RFC3339 session recency cutoff
 	Breakdowns       bool   // populate Project/AgentBreakdowns per day
 }
@@ -128,11 +129,16 @@ func (f UsageFilter) appendUsageSessionFilterClauses(
 		where += "\n\tAND s.user_message_count >= ?"
 		args = append(args, f.MinUserMessages)
 	}
+	scope := normalizeAutomatedScope(f.AutomatedScope, f.ExcludeAutomated)
 	if f.ExcludeOneShot {
-		where += "\n\tAND s.user_message_count > 1"
+		if scope == "human" {
+			where += "\n\tAND s.user_message_count > 1"
+		} else {
+			where += "\n\tAND (s.user_message_count > 1 OR COALESCE(s.is_automated, 0) = 1)"
+		}
 	}
-	if f.ExcludeAutomated {
-		where += "\n\tAND COALESCE(s.is_automated, 0) = 0"
+	if pred := automatedScopePredicate(scope, "COALESCE(s.is_automated, 0)"); pred != "" {
+		where += "\n\tAND " + pred
 	}
 	if f.ActiveSince != "" {
 		where += "\n\tAND COALESCE(s.ended_at, s.started_at, s.created_at) >= ?"

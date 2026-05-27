@@ -9,13 +9,16 @@
   import { copyToClipboard } from "../../utils/clipboard.js";
   import { renderMarkdown } from "../../utils/markdown.js";
   import { scoreToGrade } from "../../utils/grade.js";
+  import { agentLabel } from "../../utils/agents.js";
   import type {
     AgentName,
+    AutomatedScope,
     CannedInsightKind,
     InsightType,
   } from "../../api/types.js";
   import DateRangeSelector from "../shared/DateRangeSelector.svelte";
   import CopyButton from "../shared/CopyButton.svelte";
+  import OptionTypeahead from "../layout/OptionTypeahead.svelte";
   import ProjectTypeahead from "../layout/ProjectTypeahead.svelte";
   import {
     buildQualityPatterns,
@@ -57,6 +60,60 @@
       ...summary.scoreDistribution.map((bucket) => bucket.count),
     ),
   );
+  const agentOptions = $derived.by(() => {
+    const opts = [...sessions.agents]
+      .sort((a, b) => b.session_count - a.session_count)
+      .map((agent) => ({
+        name: agent.name,
+        label: `${agentLabel(agent.name)} (${agent.session_count})`,
+        displayLabel: agentLabel(agent.name),
+        count: agent.session_count,
+      }));
+    return [
+      {
+        name: "",
+        label: "All Agents",
+        displayLabel: "All Agents",
+        count: 0,
+      },
+      ...opts,
+    ];
+  });
+  const generationAgentOptions = $derived.by(() => {
+    const opts = [...sessions.agents]
+      .sort((a, b) => b.session_count - a.session_count)
+      .map((agent) => ({
+        name: agent.name,
+        label: `${agentLabel(agent.name)} (${agent.session_count})`,
+        displayLabel: agentLabel(agent.name),
+        count: agent.session_count,
+      }));
+    if (!opts.some((agent) => agent.name === insights.agent)) {
+      opts.unshift({
+        name: insights.agent,
+        label: agentLabel(insights.agent),
+        displayLabel: agentLabel(insights.agent),
+        count: 0,
+      });
+    }
+    return opts;
+  });
+  const templateOptions = [
+    { name: "prompt_maturity_review", label: "Prompt Maturity" },
+    { name: "context_setup_review", label: "Context Setup" },
+    { name: "workflow_hygiene_review", label: "Workflow Hygiene" },
+    { name: "tool_reliability_review", label: "Tool Reliability" },
+    { name: "model_cost_review", label: "Model and Cost" },
+    {
+      name: "instruction_opportunity_review",
+      label: "Instruction Opportunities",
+    },
+  ];
+  const scopeOptions = [
+    { name: "human", label: "No automated" },
+    { name: "all", label: "Both" },
+    { name: "automated", label: "Only automated" },
+  ];
 
   function fetchInsightSignals() {
     analytics.fetchSignalsForInsights();
@@ -67,20 +124,21 @@
     fetchInsightSignals();
   }
 
-  function handleAgentChange(e: Event) {
-    const select = e.target as HTMLSelectElement;
-    analytics.agent = select.value;
+  function handleAgentChange(value: string) {
+    analytics.agent = value;
     fetchInsightSignals();
   }
 
-  function handleInsightAgentChange(e: Event) {
-    const select = e.target as HTMLSelectElement;
-    insights.setAgent(select.value as AgentName);
+  function handleInsightAgentChange(value: string) {
+    insights.setAgent(value as AgentName);
   }
 
-  function handleCannedKindChange(e: Event) {
-    const select = e.target as HTMLSelectElement;
-    insights.setCannedKind(select.value as CannedInsightKind);
+  function handleCannedKindChange(value: string) {
+    insights.setCannedKind(value as CannedInsightKind);
+  }
+
+  function handleAutomatedScopeChange(value: string) {
+    analytics.setAutomatedScope(value as AutomatedScope);
   }
 
   function handlePromptChange(e: Event) {
@@ -94,6 +152,7 @@
     insights.setDateFrom(analytics.from);
     insights.setDateTo(analytics.to);
     insights.setProject(analytics.project);
+    insights.setAutomatedScope(analytics.automatedScope);
     insights.generate();
   }
 
@@ -234,6 +293,7 @@
 
   onMount(() => {
     sessions.loadProjects();
+    sessions.loadAgents();
     fetchInsightSignals();
     insights.load();
     refreshTimer = setInterval(
@@ -255,8 +315,6 @@
       sessions.filters.minUserMessages;
     const headerIncludeOneShot =
       sessions.filters.includeOneShot;
-    const headerIncludeAutomated =
-      sessions.filters.includeAutomated;
 
     const changed =
       untrack(() => analytics.project) !== headerProject ||
@@ -268,9 +326,7 @@
       untrack(() => analytics.minUserMessages) !==
         (headerMinUserMessages > 0 ? headerMinUserMessages : 0) ||
       untrack(() => analytics.includeOneShot) !==
-        headerIncludeOneShot ||
-      untrack(() => analytics.includeAutomated) !==
-        headerIncludeAutomated;
+        headerIncludeOneShot;
 
     if (changed) {
       analytics.project = headerProject;
@@ -281,7 +337,6 @@
       analytics.minUserMessages =
         headerMinUserMessages > 0 ? headerMinUserMessages : 0;
       analytics.includeOneShot = headerIncludeOneShot;
-      analytics.includeAutomated = headerIncludeAutomated;
       untrack(() => fetchInsightSignals());
     }
   });
@@ -316,19 +371,29 @@
         value={analytics.project}
         onselect={handleProjectChange}
       />
-      <select
-        class="agent-select"
+      <OptionTypeahead
+        options={agentOptions}
         value={analytics.agent}
-        onchange={handleAgentChange}
-        aria-label="Filter insights by agent"
-      >
-        <option value="">All agents</option>
-        <option value="claude">Claude</option>
-        <option value="codex">Codex</option>
-        <option value="copilot">Copilot</option>
-        <option value="gemini">Gemini</option>
-        <option value="kiro">Kiro</option>
-      </select>
+        fallbackLabel={analytics.agent
+          ? agentLabel(analytics.agent)
+          : "All Agents"}
+        placeholder="Filter agents..."
+        title="Filter insights by agent"
+        emptyLabel="No matching agents"
+        onselect={handleAgentChange}
+      />
+      <label class="toolbar-scope">
+        <span>Session scope</span>
+        <OptionTypeahead
+          options={scopeOptions}
+          value={analytics.automatedScope}
+          fallbackLabel="No automated"
+          placeholder="Filter scopes..."
+          title="Filter insights by session scope"
+          emptyLabel="No matching scopes"
+          onselect={handleAutomatedScopeChange}
+        />
+      </label>
     </div>
 
     <button
@@ -562,35 +627,28 @@
       <div class="generated-controls">
         <label class="generated-control">
           <span>Template</span>
-          <select
-            class="generated-select"
+          <OptionTypeahead
+            options={templateOptions}
             value={insights.cannedKind}
-            onchange={handleCannedKindChange}
-          >
-            <option value="prompt_maturity_review">Prompt Maturity</option>
-            <option value="context_setup_review">Context Setup</option>
-            <option value="workflow_hygiene_review">Workflow Hygiene</option>
-            <option value="tool_reliability_review">Tool Reliability</option>
-            <option value="model_cost_review">Model and Cost</option>
-            <option value="instruction_opportunity_review">
-              Instruction Opportunities
-            </option>
-          </select>
+            fallbackLabel={cannedKindLabel(insights.cannedKind)}
+            placeholder="Filter templates..."
+            title="Select template"
+            emptyLabel="No matching templates"
+            onselect={handleCannedKindChange}
+          />
         </label>
 
         <label class="generated-control">
           <span>Model agent</span>
-          <select
-            class="generated-select"
+          <OptionTypeahead
+            options={generationAgentOptions}
             value={insights.agent}
-            onchange={handleInsightAgentChange}
-          >
-            <option value="claude">Claude</option>
-            <option value="codex">Codex</option>
-            <option value="copilot">Copilot</option>
-            <option value="gemini">Gemini</option>
-            <option value="kiro">Kiro</option>
-          </select>
+            fallbackLabel={agentLabel(insights.agent)}
+            placeholder="Filter agents..."
+            title="Select model agent"
+            emptyLabel="No matching agents"
+            onselect={handleInsightAgentChange}
+          />
         </label>
 
         <label class="generated-control focus-control">
@@ -663,11 +721,26 @@
 
           <article class="generated-detail">
             {#if insights.selectedTask}
-              <span class="badge generated">
-                {insights.selectedTask.status === "error"
-                  ? "Generation error"
-                  : "Generating"}
-              </span>
+              <div class="generated-detail-head">
+                <span class="badge generated">
+                  {insights.selectedTask.status === "error"
+                    ? "Generation error"
+                    : "Generating"}
+                </span>
+                {#if insights.selectedTask.status === "error"}
+                  <div class="generated-actions">
+                    <button
+                      class="text-btn"
+                      onclick={() =>
+                        insights.retryTask(
+                          insights.selectedTask!.clientId,
+                        )}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                {/if}
+              </div>
               {#if insights.selectedTask.error}
                 <p>{insights.selectedTask.error}</p>
               {:else}
@@ -772,6 +845,30 @@
     color: var(--text-secondary);
     padding: 0 6px;
     font-size: 12px;
+  }
+
+  .toolbar-scope {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 210px;
+  }
+
+  .toolbar-scope span {
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .filter-group :global(.typeahead),
+  .toolbar-scope :global(.typeahead),
+  .generated-control :global(.typeahead) {
+    min-width: 0;
+    max-width: none;
+    width: 100%;
   }
 
   .icon-btn {
@@ -1204,7 +1301,9 @@
 
   .generated-controls {
     display: grid;
-    grid-template-columns: minmax(180px, 220px) minmax(130px, 160px) minmax(240px, 1fr) auto;
+    grid-template-columns:
+      minmax(180px, 220px) minmax(130px, 160px)
+      minmax(240px, 1fr) auto;
     gap: 10px;
     align-items: end;
     padding: 12px;
@@ -1227,7 +1326,6 @@
     text-transform: uppercase;
   }
 
-  .generated-select,
   .generated-focus {
     width: 100%;
     border: 1px solid var(--border-muted);
@@ -1235,11 +1333,6 @@
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-size: 12px;
-  }
-
-  .generated-select {
-    height: 30px;
-    padding: 0 8px;
   }
 
   .generated-focus {
