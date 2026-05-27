@@ -192,6 +192,8 @@
       from={analytics.from}
       to={analytics.to}
       busy={analytics.isQuerying}
+      rollingDays={analytics.windowDays}
+      isPinned={analytics.isPinned}
       onChange={(from, to) => analytics.setDateRange(from, to)}
       onPreset={(days) => analytics.setRollingWindow(days)}
     />
