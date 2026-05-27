@@ -47,6 +47,7 @@ function makeSignals(
         duplicate_prompt_count: 1,
         no_code_context_count: 1,
         runaway_tool_loop_count: 0,
+        frustration_marker_count: 0,
       },
       sessions_with_signal: {
         short_prompt_count: 2,
@@ -56,6 +57,7 @@ function makeSignals(
         duplicate_prompt_count: 1,
         no_code_context_count: 1,
         runaway_tool_loop_count: 0,
+        frustration_marker_count: 0,
       },
     },
     trend: [
@@ -96,6 +98,7 @@ function makeSignals(
         avg_failure_signals: 1.4,
       },
     ],
+    calibration: {},
     ...overrides,
   };
 }
@@ -174,6 +177,7 @@ describe("quality pattern transforms", () => {
           duplicate_prompt_count: 0,
           no_code_context_count: 0,
           runaway_tool_loop_count: 2,
+          frustration_marker_count: 0,
         },
         sessions_with_signal: {
           short_prompt_count: 0,
@@ -183,6 +187,7 @@ describe("quality pattern transforms", () => {
           duplicate_prompt_count: 0,
           no_code_context_count: 0,
           runaway_tool_loop_count: 2,
+          frustration_marker_count: 0,
         },
       },
     });
@@ -234,6 +239,7 @@ describe("quality pattern transforms", () => {
           duplicate_prompt_count: 0,
           no_code_context_count: 0,
           runaway_tool_loop_count: 0,
+          frustration_marker_count: 0,
         },
         sessions_with_signal: {
           short_prompt_count: 0,
@@ -243,6 +249,7 @@ describe("quality pattern transforms", () => {
           duplicate_prompt_count: 0,
           no_code_context_count: 0,
           runaway_tool_loop_count: 0,
+          frustration_marker_count: 0,
         },
       },
     });
@@ -257,22 +264,24 @@ describe("quality pattern transforms", () => {
       quality_health: {
         computed_sessions: 100,
         totals: {
-          short_prompt_count: 17,
-          unstructured_start: 0,
+          short_prompt_count: 0,
+          unstructured_start: 17,
           missing_success_criteria_count: 0,
           missing_verification_count: 0,
           duplicate_prompt_count: 0,
           no_code_context_count: 0,
           runaway_tool_loop_count: 0,
+          frustration_marker_count: 0,
         },
         sessions_with_signal: {
-          short_prompt_count: 17,
-          unstructured_start: 0,
+          short_prompt_count: 0,
+          unstructured_start: 17,
           missing_success_criteria_count: 0,
           missing_verification_count: 0,
           duplicate_prompt_count: 0,
           no_code_context_count: 0,
           runaway_tool_loop_count: 0,
+          frustration_marker_count: 0,
         },
       },
     });
@@ -280,24 +289,26 @@ describe("quality pattern transforms", () => {
       quality_health: {
         computed_sessions: 100,
         totals: {
-          short_prompt_count:
+          short_prompt_count: 0,
+          unstructured_start:
             QUALITY_PATTERN_SEVERITY_THRESHOLDS.warningRatio * 100,
-          unstructured_start: 0,
           missing_success_criteria_count: 0,
           missing_verification_count: 0,
           duplicate_prompt_count: 0,
           no_code_context_count: 0,
           runaway_tool_loop_count: 0,
+          frustration_marker_count: 0,
         },
         sessions_with_signal: {
-          short_prompt_count:
+          short_prompt_count: 0,
+          unstructured_start:
             QUALITY_PATTERN_SEVERITY_THRESHOLDS.warningRatio * 100,
-          unstructured_start: 0,
           missing_success_criteria_count: 0,
           missing_verification_count: 0,
           duplicate_prompt_count: 0,
           no_code_context_count: 0,
           runaway_tool_loop_count: 0,
+          frustration_marker_count: 0,
         },
       },
     });
@@ -305,24 +316,26 @@ describe("quality pattern transforms", () => {
       quality_health: {
         computed_sessions: 100,
         totals: {
-          short_prompt_count:
+          short_prompt_count: 0,
+          unstructured_start:
             QUALITY_PATTERN_SEVERITY_THRESHOLDS.criticalRatio * 100,
-          unstructured_start: 0,
           missing_success_criteria_count: 0,
           missing_verification_count: 0,
           duplicate_prompt_count: 0,
           no_code_context_count: 0,
           runaway_tool_loop_count: 0,
+          frustration_marker_count: 0,
         },
         sessions_with_signal: {
-          short_prompt_count:
+          short_prompt_count: 0,
+          unstructured_start:
             QUALITY_PATTERN_SEVERITY_THRESHOLDS.criticalRatio * 100,
-          unstructured_start: 0,
           missing_success_criteria_count: 0,
           missing_verification_count: 0,
           duplicate_prompt_count: 0,
           no_code_context_count: 0,
           runaway_tool_loop_count: 0,
+          frustration_marker_count: 0,
         },
       },
     });

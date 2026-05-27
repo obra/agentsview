@@ -41,7 +41,10 @@ var (
 	fileRefRe   = regexp.MustCompile(
 		`(?i)(?:^|[\s"'` + "`" + `])(?:\.{0,2}/)?[a-z0-9_.-]+(?:/[a-z0-9_. -]+)+|[a-z0-9_.-]+\.(?:go|ts|tsx|js|jsx|py|rs|java|kt|rb|php|cs|cpp|c|h|hpp|sql|svelte|vue|css|scss|html|json|ya?ml|toml|md|sh|zsh|bash)`,
 	)
-	bulletRe = regexp.MustCompile(`(?m)^\s*(?:[-*+]|\d+\.)\s+\S+`)
+	bulletRe            = regexp.MustCompile(`(?m)^\s*(?:[-*+]|\d+\.)\s+\S+`)
+	frustrationPhraseRe = regexp.MustCompile(
+		`(?i)(!{3,}|\?{3,}|\b(?:wtf|come on|why won't|this is broken|doesn't work|does not work|still broken|same error|you broke|fucking|fuck)\b)`,
+	)
 )
 
 var controlPrompts = map[string]struct{}{
@@ -91,6 +94,37 @@ func AnalyzeHeuristics(in HeuristicInput) HeuristicSignals {
 	return s
 }
 
+// IsFrustrationMarker reports whether a user prompt matches the
+// reference Coach frustration rules: repeated punctuation, high
+// caps-word ratio, or direct hostile/frustrated language. It strips
+// fenced code first so pasted logs do not become tone signals.
+func IsFrustrationMarker(content string) bool {
+	normalized := normalizePrompt(content)
+	if len(normalized) < 10 {
+		return false
+	}
+	if frustrationPhraseRe.MatchString(normalized) {
+		return true
+	}
+	return capsWordRatio(content, 3) >= 0.4
+}
+
+// CountFrustrationMarkers counts user prompts that indicate the
+// session is going badly. This is an analytics marker, not a
+// standalone prompt-quality penalty.
+func CountFrustrationMarkers(msgs []HeuristicMessage) int {
+	count := 0
+	for _, m := range msgs {
+		if m.IsSystem || m.Role != "user" {
+			continue
+		}
+		if IsFrustrationMarker(m.Content) {
+			count++
+		}
+	}
+	return count
+}
+
 type promptInfo struct {
 	Content    string
 	Normalized string
@@ -134,6 +168,41 @@ func promptTokens(normalized string) []string {
 		}
 	}
 	return tokens
+}
+
+func capsWordRatio(content string, minWords int) float64 {
+	withoutCode := codeFenceRe.ReplaceAllString(content, " ")
+	words := strings.FieldsFunc(withoutCode, func(r rune) bool {
+		return !unicode.IsLetter(r)
+	})
+	if len(words) < minWords {
+		return 0
+	}
+	total := 0
+	caps := 0
+	for _, word := range words {
+		if len([]rune(word)) < 2 {
+			continue
+		}
+		total++
+		hasLower := false
+		hasUpper := false
+		for _, r := range word {
+			if unicode.IsLower(r) {
+				hasLower = true
+			}
+			if unicode.IsUpper(r) {
+				hasUpper = true
+			}
+		}
+		if hasUpper && !hasLower {
+			caps++
+		}
+	}
+	if total < minWords {
+		return 0
+	}
+	return float64(caps) / float64(total)
 }
 
 func isControlPrompt(normalized string) bool {

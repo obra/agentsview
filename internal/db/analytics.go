@@ -7,6 +7,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+
+	"github.com/wesm/agentsview/internal/signals"
 )
 
 // maxSQLVars is the maximum bind variables per IN clause to stay
@@ -2868,18 +2871,19 @@ func (db *DB) GetAnalyticsVelocity(
 
 // SignalsAnalyticsResponse holds aggregated session signal data.
 type SignalsAnalyticsResponse struct {
-	ScoredSessions                int                  `json:"scored_sessions"`
-	UnscoredSessions              int                  `json:"unscored_sessions"`
-	GradeDistribution             map[string]int       `json:"grade_distribution"`
-	AvgHealthScore                *float64             `json:"avg_health_score"`
-	OutcomeDistribution           map[string]int       `json:"outcome_distribution"`
-	OutcomeConfidenceDistribution map[string]int       `json:"outcome_confidence_distribution"`
-	ToolHealth                    SignalsToolHealth    `json:"tool_health"`
-	ContextHealth                 SignalsContextHealth `json:"context_health"`
-	QualityHealth                 SignalsQualityHealth `json:"quality_health"`
-	Trend                         []SignalsTrendBucket `json:"trend"`
-	ByAgent                       []SignalsAgentRow    `json:"by_agent"`
-	ByProject                     []SignalsProjectRow  `json:"by_project"`
+	ScoredSessions                int                          `json:"scored_sessions"`
+	UnscoredSessions              int                          `json:"unscored_sessions"`
+	GradeDistribution             map[string]int               `json:"grade_distribution"`
+	AvgHealthScore                *float64                     `json:"avg_health_score"`
+	OutcomeDistribution           map[string]int               `json:"outcome_distribution"`
+	OutcomeConfidenceDistribution map[string]int               `json:"outcome_confidence_distribution"`
+	ToolHealth                    SignalsToolHealth            `json:"tool_health"`
+	ContextHealth                 SignalsContextHealth         `json:"context_health"`
+	QualityHealth                 SignalsQualityHealth         `json:"quality_health"`
+	Trend                         []SignalsTrendBucket         `json:"trend"`
+	ByAgent                       []SignalsAgentRow            `json:"by_agent"`
+	ByProject                     []SignalsProjectRow          `json:"by_project"`
+	Calibration                   map[string]SignalCalibration `json:"calibration"`
 }
 
 // SignalsToolHealth holds aggregate tool failure metrics.
@@ -2920,6 +2924,53 @@ type QualitySignalTotals struct {
 	DuplicatePromptCount        int `json:"duplicate_prompt_count"`
 	NoCodeContextCount          int `json:"no_code_context_count"`
 	RunawayToolLoopCount        int `json:"runaway_tool_loop_count"`
+	FrustrationMarkerCount      int `json:"frustration_marker_count"`
+}
+
+// SignalCalibration compares sessions with a signal to sessions
+// without it for the active filter slice.
+type SignalCalibration struct {
+	Signal                 string   `json:"signal"`
+	AffectedSessions       int      `json:"affected_sessions"`
+	BaselineSessions       int      `json:"baseline_sessions"`
+	AffectedIncompleteRate float64  `json:"affected_incomplete_rate"`
+	BaselineIncompleteRate float64  `json:"baseline_incomplete_rate"`
+	IncompleteLift         *float64 `json:"incomplete_lift"`
+	AvgScoreDelta          *float64 `json:"avg_score_delta"`
+}
+
+// SignalSessionsResponse returns concrete sessions that triggered
+// an aggregate signal, including the best available message excerpt.
+type SignalSessionsResponse struct {
+	Signal   string                 `json:"signal"`
+	Sessions []SignalSessionExample `json:"sessions"`
+}
+
+type SignalSessionExample struct {
+	SessionID      string  `json:"session_id"`
+	Project        string  `json:"project"`
+	Agent          string  `json:"agent"`
+	Date           string  `json:"date"`
+	IsAutomated    bool    `json:"is_automated"`
+	Outcome        string  `json:"outcome"`
+	HealthScore    *int    `json:"health_score"`
+	HealthGrade    *string `json:"health_grade"`
+	SignalTotal    int     `json:"signal_total"`
+	ReasonCode     string  `json:"reason_code"`
+	Excerpt        string  `json:"excerpt"`
+	MessageOrdinal *int    `json:"message_ordinal,omitempty"`
+	FailureSignals int     `json:"failure_signals"`
+	Retries        int     `json:"retries"`
+	EditChurn      int     `json:"edit_churn"`
+}
+
+type SignalMessage struct {
+	SessionID  string
+	Ordinal    int
+	Role       string
+	Content    string
+	IsSystem   bool
+	HasToolUse bool
 }
 
 // SignalsTrendBucket holds signal data for one date bucket.
@@ -2960,6 +3011,8 @@ type SignalRow struct {
 	Agent                       string
 	Project                     string
 	Date                        string
+	FirstMessage                *string
+	IsAutomated                 bool
 	HealthScore                 *int
 	HealthGrade                 *string
 	Outcome                     string
@@ -2978,6 +3031,7 @@ type SignalRow struct {
 	DuplicatePromptCount        int
 	NoCodeContextCount          int
 	RunawayToolLoopCount        int
+	FrustrationMarkerCount      int
 }
 
 // GetAnalyticsSignals returns aggregated session signal data.
@@ -2997,7 +3051,7 @@ func (db *DB) GetAnalyticsSignals(
 		}
 	}
 
-	query := `SELECT id, agent, project,
+	query := `SELECT id, agent, project, first_message, is_automated,
 		` + dateCol + `,
 		health_score, health_grade, outcome,
 		outcome_confidence,
@@ -3028,7 +3082,8 @@ func (db *DB) GetAnalyticsSignals(
 		var r SignalRow
 		var ts string
 		if err := rows.Scan(
-			&r.ID, &r.Agent, &r.Project, &ts,
+			&r.ID, &r.Agent, &r.Project,
+			&r.FirstMessage, &r.IsAutomated, &ts,
 			&r.HealthScore, &r.HealthGrade,
 			&r.Outcome, &r.OutcomeConfidence,
 			&r.ToolFailureSignalCount,
@@ -3062,8 +3117,576 @@ func (db *DB) GetAnalyticsSignals(
 				"iterating signals rows: %w", err,
 			)
 	}
+	if err := db.populateFrustrationMarkers(ctx, all); err != nil {
+		return SignalsAnalyticsResponse{}, err
+	}
 
 	return AggregateSignals(all), nil
+}
+
+// GetAnalyticsSignalSessions returns concrete examples for a
+// signal within the current analytics filter.
+func (db *DB) GetAnalyticsSignalSessions(
+	ctx context.Context,
+	f AnalyticsFilter,
+	signal string,
+	limit int,
+) (SignalSessionsResponse, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 10
+	}
+	rows, err := db.signalRows(ctx, f)
+	if err != nil {
+		return SignalSessionsResponse{}, err
+	}
+	if err := db.populateFrustrationMarkers(ctx, rows); err != nil {
+		return SignalSessionsResponse{}, err
+	}
+	candidates := SignalCandidates(rows, signal, limit)
+	messages, err := db.signalMessages(ctx, candidates)
+	if err != nil {
+		return SignalSessionsResponse{}, err
+	}
+	return SignalSessionsResponse{
+		Signal:   signal,
+		Sessions: BuildSignalExamples(candidates, messages, signal),
+	}, nil
+}
+
+func (db *DB) signalRows(
+	ctx context.Context,
+	f AnalyticsFilter,
+) ([]SignalRow, error) {
+	loc := f.location()
+	dateCol := "COALESCE(NULLIF(started_at, ''), created_at)"
+	where, args := f.buildWhere(dateCol)
+
+	var timeIDs map[string]bool
+	if f.HasTimeFilter() {
+		var err error
+		timeIDs, err = db.filteredSessionIDs(ctx, f)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	query := `SELECT id, agent, project, first_message, is_automated,
+		` + dateCol + `,
+		health_score, health_grade, outcome,
+		outcome_confidence,
+		tool_failure_signal_count, tool_retry_count,
+		edit_churn_count, compaction_count,
+		mid_task_compaction_count,
+		context_pressure_max,
+		quality_signal_version,
+		short_prompt_count, unstructured_start,
+		missing_success_criteria_count,
+		missing_verification_count, duplicate_prompt_count,
+		no_code_context_count, runaway_tool_loop_count
+		FROM sessions WHERE ` + where
+
+	rows, err := db.getReader().QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"querying analytics signal rows: %w", err,
+		)
+	}
+	defer rows.Close()
+	var all []SignalRow
+	for rows.Next() {
+		r, err := scanSignalRow(rows, loc)
+		if err != nil {
+			return nil, err
+		}
+		if !inDateRange(r.Date, f.From, f.To) {
+			continue
+		}
+		if timeIDs != nil && !timeIDs[r.ID] {
+			continue
+		}
+		all = append(all, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf(
+			"iterating analytics signal rows: %w", err,
+		)
+	}
+	return all, nil
+}
+
+func (db *DB) populateFrustrationMarkers(
+	ctx context.Context,
+	rows []SignalRow,
+) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	idx := make(map[string]int, len(rows))
+	ids := make([]string, 0, len(rows))
+	for i := range rows {
+		idx[rows[i].ID] = i
+		ids = append(ids, rows[i].ID)
+	}
+	return queryChunked(ids, func(chunk []string) error {
+		ph, args := inPlaceholders(chunk)
+		q := `SELECT session_id, ordinal, content, is_system
+			FROM messages
+			WHERE role = 'user' AND session_id IN ` + ph
+		msgRows, err := db.getReader().QueryContext(ctx, q, args...)
+		if err != nil {
+			return fmt.Errorf(
+				"querying frustration markers: %w", err,
+			)
+		}
+		defer msgRows.Close()
+		for msgRows.Next() {
+			var sessionID, content string
+			var ordinal int
+			var isSystem bool
+			if err := msgRows.Scan(
+				&sessionID, &ordinal, &content, &isSystem,
+			); err != nil {
+				return fmt.Errorf(
+					"scanning frustration marker: %w", err,
+				)
+			}
+			i, ok := idx[sessionID]
+			if !ok || isSystem {
+				continue
+			}
+			if signals.IsFrustrationMarker(content) {
+				rows[i].FrustrationMarkerCount++
+			}
+		}
+		if err := msgRows.Err(); err != nil {
+			return fmt.Errorf(
+				"iterating frustration markers: %w", err,
+			)
+		}
+		return nil
+	})
+}
+
+func scanSignalRow(rs rowScanner, loc *time.Location) (SignalRow, error) {
+	var r SignalRow
+	var ts string
+	if err := rs.Scan(
+		&r.ID, &r.Agent, &r.Project,
+		&r.FirstMessage, &r.IsAutomated, &ts,
+		&r.HealthScore, &r.HealthGrade,
+		&r.Outcome, &r.OutcomeConfidence,
+		&r.ToolFailureSignalCount,
+		&r.ToolRetryCount, &r.EditChurnCount,
+		&r.CompactionCount, &r.MidTaskCompactionCount,
+		&r.ContextPressureMax,
+		&r.QualitySignalVersion,
+		&r.ShortPromptCount, &r.UnstructuredStart,
+		&r.MissingSuccessCriteriaCount,
+		&r.MissingVerificationCount,
+		&r.DuplicatePromptCount,
+		&r.NoCodeContextCount, &r.RunawayToolLoopCount,
+	); err != nil {
+		return SignalRow{}, fmt.Errorf(
+			"scanning signal row: %w", err,
+		)
+	}
+	r.Date = localDate(ts, loc)
+	return r, nil
+}
+
+func SignalCandidates(
+	rows []SignalRow,
+	signal string,
+	limit int,
+) []SignalRow {
+	candidates := make([]SignalRow, 0)
+	for _, r := range rows {
+		if signalValue(r, signal) > 0 {
+			candidates = append(candidates, r)
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		iv := signalValue(candidates[i], signal)
+		jv := signalValue(candidates[j], signal)
+		if iv != jv {
+			return iv > jv
+		}
+		ib := isIncompleteOrLowQuality(candidates[i])
+		jb := isIncompleteOrLowQuality(candidates[j])
+		if ib != jb {
+			return ib
+		}
+		if candidates[i].HealthScore != nil &&
+			candidates[j].HealthScore != nil &&
+			*candidates[i].HealthScore != *candidates[j].HealthScore {
+			return *candidates[i].HealthScore <
+				*candidates[j].HealthScore
+		}
+		return candidates[i].Date > candidates[j].Date
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	return candidates
+}
+
+func (db *DB) signalMessages(
+	ctx context.Context,
+	rows []SignalRow,
+) (map[string][]SignalMessage, error) {
+	out := make(map[string][]SignalMessage, len(rows))
+	if len(rows) == 0 {
+		return out, nil
+	}
+	ids := make([]string, 0, len(rows))
+	for _, r := range rows {
+		ids = append(ids, r.ID)
+	}
+	err := queryChunked(ids, func(chunk []string) error {
+		ph, args := inPlaceholders(chunk)
+		q := `SELECT session_id, ordinal, role, content,
+					is_system, has_tool_use
+				FROM messages
+				WHERE session_id IN ` + ph + `
+				ORDER BY session_id, ordinal`
+		msgRows, err := db.getReader().QueryContext(ctx, q, args...)
+		if err != nil {
+			return fmt.Errorf(
+				"querying signal messages: %w", err,
+			)
+		}
+		defer msgRows.Close()
+		for msgRows.Next() {
+			var m SignalMessage
+			if err := msgRows.Scan(
+				&m.SessionID, &m.Ordinal, &m.Role,
+				&m.Content, &m.IsSystem, &m.HasToolUse,
+			); err != nil {
+				return fmt.Errorf(
+					"scanning signal message: %w", err,
+				)
+			}
+			out[m.SessionID] = append(out[m.SessionID], m)
+		}
+		if err := msgRows.Err(); err != nil {
+			return fmt.Errorf(
+				"iterating signal messages: %w", err,
+			)
+		}
+		return nil
+	})
+	return out, err
+}
+
+func BuildSignalExamples(
+	rows []SignalRow,
+	messages map[string][]SignalMessage,
+	signal string,
+) []SignalSessionExample {
+	examples := make([]SignalSessionExample, 0, len(rows))
+	for _, r := range rows {
+		excerpt, ordinal := signalExcerpt(
+			signal, r, messages[r.ID],
+		)
+		examples = append(examples, SignalSessionExample{
+			SessionID:      r.ID,
+			Project:        r.Project,
+			Agent:          r.Agent,
+			Date:           r.Date,
+			IsAutomated:    r.IsAutomated,
+			Outcome:        r.Outcome,
+			HealthScore:    r.HealthScore,
+			HealthGrade:    r.HealthGrade,
+			SignalTotal:    signalValue(r, signal),
+			ReasonCode:     signalReason(signal),
+			Excerpt:        truncateExcerpt(excerpt, 180),
+			MessageOrdinal: ordinal,
+			FailureSignals: r.ToolFailureSignalCount,
+			Retries:        r.ToolRetryCount,
+			EditChurn:      r.EditChurnCount,
+		})
+	}
+	return examples
+}
+
+func signalExcerpt(
+	signal string,
+	r SignalRow,
+	messages []SignalMessage,
+) (string, *int) {
+	switch signal {
+	case "frustration_marker_count":
+		if content, ordinal, ok := firstFrustrationPrompt(messages); ok {
+			return content, ordinal
+		}
+	case "short_prompt_count":
+		if content, ordinal, ok := firstShortPrompt(messages); ok {
+			return content, ordinal
+		}
+	case "duplicate_prompt_count":
+		if content, ordinal, ok := firstRepeatedPrompt(messages); ok {
+			return content, ordinal
+		}
+	case "tool_failure_signals", "tool_retries", "edit_churn",
+		"runaway_tool_loop_count":
+		if content, ordinal, ok := firstToolUseMessage(messages); ok {
+			return content, ordinal
+		}
+	case "outcome_errored", "outcome_abandoned", "outcome_completed",
+		"sessions_with_compaction", "mid_task_compaction_count",
+		"high_pressure_sessions":
+		if content, ordinal, ok := lastSessionMessage(messages); ok {
+			return content, ordinal
+		}
+	}
+	if content, ordinal, ok := firstSubstantiveUserMessage(messages); ok {
+		return content, ordinal
+	}
+	if r.FirstMessage != nil {
+		return *r.FirstMessage, nil
+	}
+	return "", nil
+}
+
+func firstFrustrationPrompt(
+	messages []SignalMessage,
+) (string, *int, bool) {
+	for _, m := range messages {
+		if !isUserEvidenceMessage(m) {
+			continue
+		}
+		if signals.IsFrustrationMarker(m.Content) {
+			content, ordinal := messageEvidence(m)
+			return content, ordinal, true
+		}
+	}
+	return "", nil, false
+}
+
+func firstShortPrompt(
+	messages []SignalMessage,
+) (string, *int, bool) {
+	for _, m := range messages {
+		if !isUserEvidenceMessage(m) {
+			continue
+		}
+		normalized := normalizeEvidenceText(m.Content)
+		if isControlEvidencePrompt(normalized) {
+			continue
+		}
+		if len(normalized) < 30 {
+			content, ordinal := messageEvidence(m)
+			return content, ordinal, true
+		}
+	}
+	return "", nil, false
+}
+
+func firstRepeatedPrompt(
+	messages []SignalMessage,
+) (string, *int, bool) {
+	type prompt struct {
+		normalized string
+		tokens     []string
+	}
+	seen := make([]prompt, 0, len(messages))
+	for _, m := range messages {
+		if !isUserEvidenceMessage(m) {
+			continue
+		}
+		key := evidencePromptKey(m.Content)
+		if key == "" {
+			continue
+		}
+		tokens := evidencePromptTokens(key)
+		if len(tokens) < 4 {
+			continue
+		}
+		for _, prev := range seen {
+			if key == prev.normalized ||
+				evidenceJaccard(tokens, prev.tokens) >= 0.85 {
+				content, ordinal := messageEvidence(m)
+				return content, ordinal, true
+			}
+		}
+		seen = append(seen, prompt{
+			normalized: key,
+			tokens:     tokens,
+		})
+	}
+	return "", nil, false
+}
+
+func firstToolUseMessage(
+	messages []SignalMessage,
+) (string, *int, bool) {
+	for _, m := range messages {
+		if m.IsSystem || !m.HasToolUse {
+			continue
+		}
+		content, ordinal := messageEvidence(m)
+		return content, ordinal, true
+	}
+	return "", nil, false
+}
+
+func lastSessionMessage(
+	messages []SignalMessage,
+) (string, *int, bool) {
+	for i := len(messages) - 1; i >= 0; i-- {
+		m := messages[i]
+		if m.IsSystem {
+			continue
+		}
+		if !isSubstantiveEvidence(m.Content) && !m.HasToolUse {
+			continue
+		}
+		content, ordinal := messageEvidence(m)
+		return content, ordinal, true
+	}
+	return "", nil, false
+}
+
+func firstSubstantiveUserMessage(
+	messages []SignalMessage,
+) (string, *int, bool) {
+	for _, m := range messages {
+		if !isUserEvidenceMessage(m) {
+			continue
+		}
+		content, ordinal := messageEvidence(m)
+		return content, ordinal, true
+	}
+	return "", nil, false
+}
+
+func isUserEvidenceMessage(m SignalMessage) bool {
+	return m.Role == "user" &&
+		!m.IsSystem &&
+		isSubstantiveEvidence(m.Content)
+}
+
+func isSubstantiveEvidence(content string) bool {
+	return normalizeEvidenceText(content) != ""
+}
+
+func evidencePromptKey(content string) string {
+	key := normalizeEvidenceText(content)
+	if len(key) < 20 || isControlEvidencePrompt(key) {
+		return ""
+	}
+	return key
+}
+
+func evidencePromptTokens(normalized string) []string {
+	return strings.FieldsFunc(normalized, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func evidenceJaccard(a, b []string) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	seen := map[string]struct{}{}
+	for _, token := range a {
+		seen[token] = struct{}{}
+	}
+	intersections := 0
+	union := len(seen)
+	for _, token := range b {
+		if _, ok := seen[token]; ok {
+			intersections++
+		} else {
+			union++
+		}
+	}
+	if union == 0 {
+		return 0
+	}
+	return float64(intersections) / float64(union)
+}
+
+func isControlEvidencePrompt(normalized string) bool {
+	switch normalized {
+	case "yes", "y", "no", "n", "ok", "okay",
+		"continue", "go ahead", "proceed",
+		"do it", "done", "thanks", "thank you",
+		"please continue", "keep going":
+		return true
+	default:
+		return false
+	}
+}
+
+func messageEvidence(m SignalMessage) (string, *int) {
+	ordinal := m.Ordinal
+	content := strings.TrimSpace(m.Content)
+	if content == "" && m.HasToolUse {
+		content = "Tool-use turn"
+	}
+	return content, &ordinal
+}
+
+func signalReason(signal string) string {
+	switch signal {
+	case "short_prompt_count":
+		return "short-start-contextual"
+	case "unstructured_start":
+		return "unstructured-task-start"
+	case "missing_success_criteria_count":
+		return "missing-observable-acceptance"
+	case "missing_verification_count":
+		return "missing-targeted-verification-path"
+	case "duplicate_prompt_count":
+		return "possible-stuck-reask"
+	case "no_code_context_count":
+		return "code-task-without-context"
+	case "runaway_tool_loop_count":
+		return "repeated-failing-tool-cycle"
+	case "frustration_marker_count":
+		return "frustration-marker"
+	case "outcome_errored":
+		return "errored-outcome"
+	case "outcome_abandoned":
+		return "abandoned-outcome"
+	case "outcome_completed":
+		return "completed-outcome"
+	case "tool_failure_signals":
+		return "tool-failure-signal"
+	case "tool_retries":
+		return "tool-retry"
+	case "edit_churn":
+		return "edit-churn"
+	case "sessions_with_compaction":
+		return "context-compaction"
+	case "mid_task_compaction_count":
+		return "mid-task-compaction"
+	case "high_pressure_sessions":
+		return "high-context-pressure"
+	default:
+		return signal
+	}
+}
+
+func normalizeEvidenceText(content string) string {
+	lower := strings.ToLower(strings.TrimSpace(content))
+	return spaceReplacer(lower)
+}
+
+func truncateExcerpt(s string, max int) string {
+	s = strings.TrimSpace(spaceReplacer(s))
+	if len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
+}
+
+func spaceReplacer(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // AggregateSignals builds the response from collected rows.
@@ -3076,6 +3699,7 @@ func AggregateSignals(
 		GradeDistribution:             make(map[string]int),
 		OutcomeDistribution:           make(map[string]int),
 		OutcomeConfidenceDistribution: make(map[string]int),
+		Calibration:                   make(map[string]SignalCalibration),
 	}
 
 	if len(all) == 0 {
@@ -3368,6 +3992,7 @@ func AggregateSignals(
 		return resp.ByProject[i].Project <
 			resp.ByProject[j].Project
 	})
+	resp.Calibration = buildSignalCalibrations(all)
 
 	return resp
 }
@@ -3408,6 +4033,170 @@ func accumulateQualityHealth(
 	if r.RunawayToolLoopCount > 0 {
 		q.SessionsWithSignal.RunawayToolLoopCount++
 	}
+	q.Totals.FrustrationMarkerCount += r.FrustrationMarkerCount
+	if r.FrustrationMarkerCount > 0 {
+		q.SessionsWithSignal.FrustrationMarkerCount++
+	}
+}
+
+func buildSignalCalibrations(
+	rows []SignalRow,
+) map[string]SignalCalibration {
+	signals := []string{
+		"outcome_errored",
+		"outcome_abandoned",
+		"outcome_completed",
+		"tool_failure_signals",
+		"tool_retries",
+		"edit_churn",
+		"sessions_with_compaction",
+		"mid_task_compaction_count",
+		"high_pressure_sessions",
+		"short_prompt_count",
+		"unstructured_start",
+		"missing_success_criteria_count",
+		"missing_verification_count",
+		"duplicate_prompt_count",
+		"no_code_context_count",
+		"runaway_tool_loop_count",
+		"frustration_marker_count",
+	}
+	out := make(map[string]SignalCalibration, len(signals))
+	for _, signal := range signals {
+		out[signal] = calibrateSignal(rows, signal)
+	}
+	return out
+}
+
+func calibrateSignal(rows []SignalRow, signal string) SignalCalibration {
+	type side struct {
+		count      int
+		incomplete int
+		scoreSum   int
+		scoreCount int
+	}
+	var affected, baseline side
+	for _, r := range rows {
+		target := &baseline
+		if signalValue(r, signal) > 0 {
+			target = &affected
+		}
+		target.count++
+		if isIncompleteOrLowQuality(r) {
+			target.incomplete++
+		}
+		if r.HealthScore != nil {
+			target.scoreSum += *r.HealthScore
+			target.scoreCount++
+		}
+	}
+	result := SignalCalibration{
+		Signal:           signal,
+		AffectedSessions: affected.count,
+		BaselineSessions: baseline.count,
+	}
+	if affected.count > 0 {
+		result.AffectedIncompleteRate = round1(
+			float64(affected.incomplete) /
+				float64(affected.count) * 100,
+		)
+	}
+	if baseline.count > 0 {
+		result.BaselineIncompleteRate = round1(
+			float64(baseline.incomplete) /
+				float64(baseline.count) * 100,
+		)
+	}
+	if baseline.count > 0 &&
+		result.BaselineIncompleteRate > 0 &&
+		affected.count > 0 {
+		lift := round1(
+			result.AffectedIncompleteRate /
+				result.BaselineIncompleteRate,
+		)
+		result.IncompleteLift = &lift
+	}
+	if affected.scoreCount > 0 && baseline.scoreCount > 0 {
+		delta := round1(
+			float64(affected.scoreSum)/
+				float64(affected.scoreCount) -
+				float64(baseline.scoreSum)/
+					float64(baseline.scoreCount),
+		)
+		result.AvgScoreDelta = &delta
+	}
+	return result
+}
+
+func signalValue(r SignalRow, signal string) int {
+	switch signal {
+	case "outcome_errored":
+		if r.Outcome == "errored" {
+			return 1
+		}
+	case "outcome_abandoned":
+		if r.Outcome == "abandoned" {
+			return 1
+		}
+	case "outcome_completed":
+		if r.Outcome == "completed" {
+			return 1
+		}
+	case "tool_failure_signals":
+		return r.ToolFailureSignalCount
+	case "tool_retries":
+		return r.ToolRetryCount
+	case "edit_churn":
+		return r.EditChurnCount
+	case "sessions_with_compaction":
+		if r.CompactionCount > 0 {
+			return 1
+		}
+	case "mid_task_compaction_count":
+		return r.MidTaskCompactionCount
+	case "high_pressure_sessions":
+		if r.ContextPressureMax != nil &&
+			*r.ContextPressureMax >= 0.8 {
+			return 1
+		}
+	case "short_prompt_count":
+		return r.ShortPromptCount
+	case "unstructured_start":
+		if r.UnstructuredStart {
+			return 1
+		}
+	case "missing_success_criteria_count":
+		return r.MissingSuccessCriteriaCount
+	case "missing_verification_count":
+		return r.MissingVerificationCount
+	case "duplicate_prompt_count":
+		return r.DuplicatePromptCount
+	case "no_code_context_count":
+		return r.NoCodeContextCount
+	case "runaway_tool_loop_count":
+		return r.RunawayToolLoopCount
+	case "frustration_marker_count":
+		return r.FrustrationMarkerCount
+	}
+	return 0
+}
+
+func SignalValue(r SignalRow, signal string) int {
+	return signalValue(r, signal)
+}
+
+func isIncompleteOrLowQuality(r SignalRow) bool {
+	if r.Outcome == "errored" || r.Outcome == "abandoned" {
+		return true
+	}
+	if r.HealthGrade == nil {
+		return false
+	}
+	return *r.HealthGrade == "D" || *r.HealthGrade == "F"
+}
+
+func round1(v float64) float64 {
+	return math.Round(v*10) / 10
 }
 
 // --- Top Sessions ---

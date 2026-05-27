@@ -95,7 +95,7 @@ func computePenalties(in ScoreInput) map[string]int {
 	applyOutcomePenalty(in.Outcome, penalties)
 	applyToolPenalties(in, penalties)
 	applyContextPenalties(in, penalties)
-	applyHeuristicPenalties(in.Heuristics, penalties)
+	applyHeuristicPenalties(in, penalties)
 
 	return penalties
 }
@@ -164,23 +164,20 @@ func applyContextPenalties(
 }
 
 func applyHeuristicPenalties(
-	s HeuristicSignals,
+	in ScoreInput,
 	penalties map[string]int,
 ) {
-	if p := capPenalty(s.ShortPromptCount, 3); p > 0 {
-		penalties["short_prompts"] = p
-	}
+	s := in.Heuristics
 	if s.UnstructuredStart {
-		penalties["constraintless_first_prompt"] = 2
+		penalties["constraintless_first_prompt"] = 1
 	}
-	if s.MissingSuccessCriteriaCount > 0 {
-		penalties["missing_success_criteria"] = 2
+	if s.MissingSuccessCriteriaCount > 0 && s.UnstructuredStart {
+		penalties["missing_success_criteria"] = 1
 	}
-	if s.MissingVerificationCount > 0 {
-		penalties["missing_verification_language"] = 1
-	}
-	if p := capPenalty(s.DuplicatePromptCount*2, 4); p > 0 {
-		penalties["repeated_prompts"] = p
+	if isStuckReask(in) {
+		if p := capPenalty(s.DuplicatePromptCount*2, 4); p > 0 {
+			penalties["stuck_repeated_prompts"] = p
+		}
 	}
 	if s.NoCodeContextCount > 0 {
 		penalties["code_task_without_context"] = 4
@@ -188,6 +185,18 @@ func applyHeuristicPenalties(
 	if p := capPenalty(s.RunawayToolLoopCount*5, 5); p > 0 {
 		penalties["repeated_failing_tool_cycles"] = p
 	}
+}
+
+func isStuckReask(in ScoreInput) bool {
+	if in.Heuristics.DuplicatePromptCount <= 0 {
+		return false
+	}
+	return in.Outcome == "errored" ||
+		in.Outcome == "abandoned" ||
+		in.FailureSignalCount > 0 ||
+		in.RetryCount > 0 ||
+		in.ConsecutiveFailMax >= 3 ||
+		in.Heuristics.RunawayToolLoopCount > 0
 }
 
 func capPenalty(raw, max int) int {

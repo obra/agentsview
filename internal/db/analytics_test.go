@@ -2538,6 +2538,90 @@ func TestGetAnalyticsSignals(t *testing.T) {
 	})
 }
 
+func TestBuildSignalExamplesUsesObservedOrdinal(t *testing.T) {
+	tests := []struct {
+		name   string
+		signal string
+		row    SignalRow
+		msgs   []SignalMessage
+		want   int
+	}{
+		{
+			name:   "short prompts skip controls",
+			signal: "short_prompt_count",
+			row: SignalRow{
+				ID:               "short",
+				ShortPromptCount: 1,
+			},
+			msgs: []SignalMessage{
+				{SessionID: "short", Ordinal: 0, Role: "user", Content: "yes"},
+				{SessionID: "short", Ordinal: 3, Role: "user", Content: "fix bug"},
+			},
+			want: 3,
+		},
+		{
+			name:   "repeated prompts point at repeat",
+			signal: "duplicate_prompt_count",
+			row: SignalRow{
+				ID:                   "repeat",
+				DuplicatePromptCount: 1,
+			},
+			msgs: []SignalMessage{
+				{SessionID: "repeat", Ordinal: 0, Role: "user", Content: "Fix the backend test."},
+				{SessionID: "repeat", Ordinal: 2, Role: "user", Content: "Fix the backend test."},
+			},
+			want: 2,
+		},
+		{
+			name:   "tool signals point at tool turn",
+			signal: "tool_failure_signals",
+			row: SignalRow{
+				ID:                     "tool",
+				ToolFailureSignalCount: 1,
+			},
+			msgs: []SignalMessage{
+				{SessionID: "tool", Ordinal: 0, Role: "user", Content: "run tests"},
+				{SessionID: "tool", Ordinal: 4, Role: "assistant", HasToolUse: true},
+			},
+			want: 4,
+		},
+		{
+			name:   "outcomes point at last observed turn",
+			signal: "outcome_errored",
+			row: SignalRow{
+				ID:      "outcome",
+				Outcome: "errored",
+			},
+			msgs: []SignalMessage{
+				{SessionID: "outcome", Ordinal: 0, Role: "user", Content: "start"},
+				{SessionID: "outcome", Ordinal: 6, Role: "assistant", Content: "failed"},
+			},
+			want: 6,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			examples := BuildSignalExamples(
+				[]SignalRow{tt.row},
+				map[string][]SignalMessage{tt.row.ID: tt.msgs},
+				tt.signal,
+			)
+			if len(examples) != 1 {
+				t.Fatalf("len(examples) = %d, want 1",
+					len(examples))
+			}
+			if examples[0].MessageOrdinal == nil {
+				t.Fatal("MessageOrdinal is nil")
+			}
+			if *examples[0].MessageOrdinal != tt.want {
+				t.Fatalf("MessageOrdinal = %d, want %d",
+					*examples[0].MessageOrdinal, tt.want)
+			}
+		})
+	}
+}
+
 func TestLocalTime(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -207,6 +207,7 @@ function mockAllAPIs() {
         duplicate_prompt_count: 0,
         no_code_context_count: 0,
         runaway_tool_loop_count: 0,
+        frustration_marker_count: 0,
       },
       sessions_with_signal: {
         short_prompt_count: 0,
@@ -216,11 +217,13 @@ function mockAllAPIs() {
         duplicate_prompt_count: 0,
         no_code_context_count: 0,
         runaway_tool_loop_count: 0,
+        frustration_marker_count: 0,
       },
     },
     trend: [],
     by_agent: [],
     by_project: [],
+    calibration: {},
   });
 }
 

@@ -13,8 +13,8 @@
       }
     },
     "want_baseline_score": 100,
-    "want_score": 90,
-    "want_delta": -10,
+    "want_score": 94,
+    "want_delta": -6,
     "want_grade": "A",
     "want_basis": [
       "outcome",
@@ -22,10 +22,8 @@
       "context_quality"
     ],
     "want_penalties": {
-      "short_prompts": 1,
-      "constraintless_first_prompt": 2,
-      "missing_success_criteria": 2,
-      "missing_verification_language": 1,
+      "constraintless_first_prompt": 1,
+      "missing_success_criteria": 1,
       "code_task_without_context": 4
     }
   },
@@ -39,16 +37,14 @@
       }
     },
     "want_baseline_score": null,
-    "want_score": 96,
+    "want_score": 100,
     "want_delta": null,
     "want_grade": "A",
     "want_basis": [
       "outcome",
       "prompt_quality"
     ],
-    "want_penalties": {
-      "repeated_prompts": 4
-    }
+    "want_penalties": null
   },
   {
     "name": "workflow loop penalty adds workflow basis",

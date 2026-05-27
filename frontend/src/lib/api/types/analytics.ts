@@ -235,6 +235,7 @@ export interface QualitySignalTotals {
   duplicate_prompt_count: number;
   no_code_context_count: number;
   runaway_tool_loop_count: number;
+  frustration_marker_count: number;
 }
 
 export interface SignalsQualityHealth {
@@ -271,6 +272,39 @@ export interface SignalsProjectRow {
   avg_failure_signals: number;
 }
 
+export interface SignalCalibration {
+  signal: string;
+  affected_sessions: number;
+  baseline_sessions: number;
+  affected_incomplete_rate: number;
+  baseline_incomplete_rate: number;
+  incomplete_lift: number | null;
+  avg_score_delta: number | null;
+}
+
+export interface SignalSessionExample {
+  session_id: string;
+  project: string;
+  agent: string;
+  date: string;
+  is_automated: boolean;
+  outcome: string;
+  health_score: number | null;
+  health_grade: string | null;
+  signal_total: number;
+  reason_code: string;
+  excerpt: string;
+  message_ordinal?: number | null;
+  failure_signals: number;
+  retries: number;
+  edit_churn: number;
+}
+
+export interface SignalSessionsResponse {
+  signal: string;
+  sessions: SignalSessionExample[];
+}
+
 export interface SignalsAnalyticsResponse {
   scored_sessions: number;
   unscored_sessions: number;
@@ -284,6 +318,7 @@ export interface SignalsAnalyticsResponse {
   trend: SignalsTrendBucket[];
   by_agent: SignalsAgentRow[];
   by_project: SignalsProjectRow[];
+  calibration: Record<string, SignalCalibration>;
 }
 
 export interface TrendsBucket {

@@ -2,6 +2,7 @@
   import { onMount, onDestroy, untrack } from "svelte";
   import { analytics } from "../../stores/analytics.svelte.js";
   import { insights } from "../../stores/insights.svelte.js";
+  import { ui } from "../../stores/ui.svelte.js";
   import { getBasePath, router } from "../../stores/router.svelte.js";
   import { sessions } from "../../stores/sessions.svelte.js";
   import { sync } from "../../stores/sync.svelte.js";
@@ -10,11 +11,14 @@
   import { renderMarkdown } from "../../utils/markdown.js";
   import { scoreToGrade } from "../../utils/grade.js";
   import { agentLabel } from "../../utils/agents.js";
+  import { getAnalyticsSignalSessions } from "../../api/client.js";
   import type {
     AgentName,
     AutomatedScope,
     CannedInsightKind,
     InsightType,
+    SignalCalibration,
+    SignalSessionExample,
   } from "../../api/types.js";
   import DateRangeSelector from "../shared/DateRangeSelector.svelte";
   import CopyButton from "../shared/CopyButton.svelte";
@@ -36,6 +40,10 @@
   let copiedInsightLinkTimer:
     | ReturnType<typeof setTimeout>
     | undefined;
+  let selectedSignalId: string | null = $state(null);
+  let signalExamples: SignalSessionExample[] = $state([]);
+  let signalExamplesLoading = $state(false);
+  let signalExamplesError: string | null = $state(null);
 
   const signals = $derived(analytics.signals);
   const summary = $derived(buildQualitySummary(signals));
@@ -154,6 +162,53 @@
     insights.load();
   }
 
+  async function openSignalEvidence(signal: string) {
+    selectedSignalId = signal;
+    signalExamplesLoading = true;
+    signalExamplesError = null;
+    try {
+      const response = await getAnalyticsSignalSessions({
+        ...analytics.signalEvidenceParams(),
+        signal,
+        limit: 8,
+      });
+      if (selectedSignalId === signal) {
+        signalExamples = response.sessions;
+      }
+    } catch (err) {
+      if (selectedSignalId === signal) {
+        signalExamples = [];
+        signalExamplesError =
+          err instanceof Error ? err.message : "Could not load examples";
+      }
+    } finally {
+      if (selectedSignalId === signal) {
+        signalExamplesLoading = false;
+      }
+    }
+  }
+
+  function openEvidenceSession(
+    example: SignalSessionExample,
+    event: MouseEvent,
+  ) {
+    event.preventDefault();
+    const params = evidenceSessionParams(example);
+    if (example.message_ordinal != null) {
+      ui.scrollToOrdinal(example.message_ordinal, example.session_id);
+    }
+    sessions.navigateToSession(example.session_id);
+    router.navigateToSession(example.session_id, params);
+  }
+
+  function evidenceSessionParams(
+    example: SignalSessionExample,
+  ): Record<string, string> {
+    return example.message_ordinal == null
+      ? {}
+      : { msg: String(example.message_ordinal) };
+  }
+
   function insightLinkPath(id: number): string {
     const params = new URLSearchParams();
     if (Object.hasOwn(router.params, "desktop")) {
@@ -246,6 +301,38 @@
 
   function maxTrend(pattern: QualityPatternView): number {
     return Math.max(1, ...pattern.trend.map((p) => p.value));
+  }
+
+  function calibrationFor(signal: string): SignalCalibration | null {
+    return signals?.calibration?.[signal] ?? null;
+  }
+
+  function calibrationLabel(signal: string): string {
+    const calibration = calibrationFor(signal);
+    if (!calibration || calibration.affected_sessions === 0) {
+      return "No calibrated examples";
+    }
+    if (calibration.incomplete_lift == null) {
+      return `${calibration.affected_incomplete_rate}% incomplete`;
+    }
+    return `${calibration.incomplete_lift.toFixed(1)}x incomplete`;
+  }
+
+  function selectedSignalLabel(): string {
+    if (!selectedSignalId) return "Signal examples";
+    for (const pattern of patterns) {
+      const found = pattern.drivers.find(
+        (driver) => driver.id === selectedSignalId,
+      );
+      if (found) return found.label;
+    }
+    return selectedSignalId;
+  }
+
+  function qualityBadge(example: SignalSessionExample): string {
+    if (example.health_grade) return `Grade ${example.health_grade}`;
+    if (example.health_score != null) return String(example.health_score);
+    return "Unscored";
   }
 
   function cannedKindLabel(
@@ -526,13 +613,19 @@
 
               <div class="driver-list">
                 {#each pattern.drivers as driver}
-                  <div class="driver-row">
+                  <button
+                    class="driver-row"
+                    class:active={selectedSignalId === driver.id}
+                    type="button"
+                    onclick={() => openSignalEvidence(String(driver.id))}
+                  >
                     <span>{driver.label}</span>
                     <strong>
                       {driver.total}{driver.unit ?? ""}
                     </strong>
                     <em>{driver.sessions} sessions</em>
-                  </div>
+                    <small>{calibrationLabel(String(driver.id))}</small>
+                  </button>
                 {/each}
               </div>
 
@@ -564,6 +657,61 @@
             </article>
           {/each}
         </div>
+
+        {#if selectedSignalId}
+          <section class="evidence-panel" aria-live="polite">
+            <div class="evidence-head">
+              <div>
+                <span class="examples-label">Session evidence</span>
+                <h3>{selectedSignalLabel()}</h3>
+              </div>
+              <button
+                class="text-btn"
+                type="button"
+                onclick={() => {
+                  selectedSignalId = null;
+                  signalExamples = [];
+                }}
+              >
+                Close
+              </button>
+            </div>
+            {#if signalExamplesLoading}
+              <p class="evidence-state">Loading examples...</p>
+            {:else if signalExamplesError}
+              <p class="evidence-state error">{signalExamplesError}</p>
+            {:else if signalExamples.length === 0}
+              <p class="evidence-state">
+                No sessions currently trigger this signal in the selected filters.
+              </p>
+            {:else}
+              <div class="evidence-list">
+                {#each signalExamples as example}
+                  <a
+                    class="evidence-row"
+                    href={router.buildSessionHref(
+                      example.session_id,
+                      evidenceSessionParams(example),
+                    )}
+                    onclick={(event) =>
+                      openEvidenceSession(example, event)}
+                  >
+                    <span class="evidence-main">
+                      <strong>{example.project || "Unassigned project"}</strong>
+                      <em>{example.excerpt || "No prompt excerpt available"}</em>
+                    </span>
+                    <span class="evidence-meta">
+                      <span>{agentLabel(example.agent)}</span>
+                      <span>{example.outcome || "unknown"}</span>
+                      <span>{qualityBadge(example)}</span>
+                      <span>{example.failure_signals} failures</span>
+                    </span>
+                  </a>
+                {/each}
+              </div>
+            {/if}
+          </section>
+        {/if}
       {/if}
     </section>
 
@@ -1202,10 +1350,20 @@
 
   .driver-row {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
     gap: 10px;
     align-items: baseline;
+    width: 100%;
+    min-height: 24px;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
     font-size: 12px;
+    text-align: left;
+  }
+
+  .driver-row:hover,
+  .driver-row.active {
+    background: var(--bg-surface-hover);
   }
 
   .driver-row span {
@@ -1225,6 +1383,13 @@
     color: var(--text-muted);
     font-style: normal;
     font-variant-numeric: tabular-nums;
+  }
+
+  .driver-row small {
+    color: var(--text-muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   .sparkline {
@@ -1306,6 +1471,89 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .evidence-panel {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius-md);
+  }
+
+  .evidence-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .evidence-head h3 {
+    margin-top: 2px;
+    color: var(--text-primary);
+    font-size: 14px;
+  }
+
+  .evidence-state {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  .evidence-state.error {
+    color: var(--accent-red);
+  }
+
+  .evidence-list {
+    display: grid;
+    gap: 6px;
+  }
+
+  .evidence-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    padding: 9px 10px;
+    border: 1px solid var(--border-muted);
+    border-radius: var(--radius-sm);
+    background: var(--bg-inset);
+    text-decoration: none;
+  }
+
+  .evidence-row:hover {
+    border-color: var(--border-default);
+    background: var(--bg-surface-hover);
+  }
+
+  .evidence-main {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .evidence-main strong {
+    color: var(--text-primary);
+    font-size: 12px;
+  }
+
+  .evidence-main em {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-style: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .evidence-meta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
   }
 
   .recommendation-list {
@@ -1709,6 +1957,15 @@
 
     .distribution-row {
       grid-template-columns: 1fr;
+    }
+
+    .driver-row,
+    .evidence-row {
+      grid-template-columns: 1fr;
+    }
+
+    .evidence-meta {
+      justify-content: flex-start;
     }
   }
 </style>

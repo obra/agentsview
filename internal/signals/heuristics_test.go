@@ -269,3 +269,20 @@ func TestNormalizePromptRemovesCodeFences(t *testing.T) {
 		t.Fatalf("normalizePrompt() = %q, want %q", got, want)
 	}
 }
+
+func TestCountFrustrationMarkers(t *testing.T) {
+	msgs := []HeuristicMessage{
+		{Role: "user", Content: "WHY WONT THIS WORK???!!!"},
+		{Role: "user", Content: "this is broken after the retry"},
+		{Role: "assistant", Content: "I will inspect it."},
+		{Role: "user", Content: "Please run the focused test again."},
+		{
+			Role:    "user",
+			Content: "```text\nFUCK\n```\nPlease handle the log.",
+		},
+	}
+
+	if got := CountFrustrationMarkers(msgs); got != 2 {
+		t.Fatalf("CountFrustrationMarkers() = %d, want 2", got)
+	}
+}

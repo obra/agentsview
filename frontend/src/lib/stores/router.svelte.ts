@@ -135,9 +135,13 @@ export class RouterStore {
   }
 
   /** Build an href for a session link (includes sticky params). */
-  buildSessionHref(id: string): string {
+  buildSessionHref(
+    id: string,
+    params: Record<string, string> = {},
+  ): string {
     return this.#buildUrl(
       `/sessions/${encodeURIComponent(id)}`,
+      params,
     );
   }
 

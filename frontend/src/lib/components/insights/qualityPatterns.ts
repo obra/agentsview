@@ -17,6 +17,7 @@ export interface QualityPatternDriver {
   total: number;
   sessions: number;
   unit?: string;
+  strength?: "weak" | "contextual" | "strong";
 }
 
 export interface QualityPatternExample {
@@ -74,6 +75,7 @@ const emptyTotals: QualitySignalTotals = {
   duplicate_prompt_count: 0,
   no_code_context_count: 0,
   runaway_tool_loop_count: 0,
+  frustration_marker_count: 0,
 };
 
 export const QUALITY_PATTERN_SEVERITY_THRESHOLDS = {
@@ -160,48 +162,57 @@ function promptMaturityPattern(
   const drivers: QualityPatternDriver[] = [
     signalDriver(
       "short_prompt_count",
-      "Short prompts",
+      "Short starts",
       totals,
       sessions,
+      "weak",
     ),
     signalDriver(
       "unstructured_start",
       "Unstructured starts",
       totals,
       sessions,
+      "contextual",
     ),
     signalDriver(
       "missing_success_criteria_count",
       "Missing success criteria",
       totals,
       sessions,
+      "contextual",
     ),
     signalDriver(
       "missing_verification_count",
-      "Missing verification language",
+      "Missing targeted verification path",
       totals,
       sessions,
+      "weak",
     ),
     signalDriver(
       "duplicate_prompt_count",
       "Repeated prompts",
       totals,
       sessions,
+      "contextual",
     ),
   ];
-  const affected = maxSessions(drivers);
+  const severityDrivers = drivers.filter(
+    (driver) => driver.strength !== "weak",
+  );
+  const affected = maxSessions(severityDrivers);
 
   return {
     id: "prompt_maturity",
     title: "Prompt maturity",
     summary:
-      "Task-start structure, constraints, success criteria, and repeated prompts.",
+      "Task framing and acceptance evidence. Short prompts are context only.",
     severity: computed === 0
       ? "unavailable"
       : severityFromRatio(affected, computed),
     severityDescription: computed === 0
       ? "No Phase 3 prompt-quality computations are available for this range."
-      : severityDescription(affected, computed),
+      : severityDescription(affected, computed) +
+        " Weak prompt-only markers do not set severity by themselves.",
     affectedSessions: affected,
     totalSessions: computed,
     drivers,
@@ -209,7 +220,7 @@ function promptMaturityPattern(
     trend: scorePressureTrend(signals.trend),
     examples: topAgentExamples(signals),
     examplesLabel: "Comparison groups",
-    action: "Add explicit constraints, acceptance criteria, and verification language to task prompts.",
+    action: "Open the linked examples before changing prompts; tune only signals with poor outcome lift.",
   };
 }
 
@@ -283,14 +294,26 @@ function workflowHygienePattern(
     "Repeated failing tool cycles",
     totals,
     sessions,
+    "strong",
   );
-  const affected = Math.max(interrupted, runawayDriver.sessions);
+  const frustrationDriver = signalDriver(
+    "frustration_marker_count",
+    "Frustration markers",
+    totals,
+    sessions,
+    "contextual",
+  );
+  const affected = Math.max(
+    interrupted,
+    runawayDriver.sessions,
+    frustrationDriver.sessions,
+  );
 
   return {
     id: "workflow_hygiene",
     title: "Workflow hygiene",
     summary:
-      "Errored, abandoned, and repeated failing tool-cycle sessions.",
+      "Errored, abandoned, frustrated, and repeated failing tool-cycle sessions.",
     severity: severityFromRatio(affected, total),
     severityDescription: severityDescription(affected, total),
     affectedSessions: affected,
@@ -315,6 +338,7 @@ function workflowHygienePattern(
         sessions: outcomes.completed ?? 0,
       },
       runawayDriver,
+      frustrationDriver,
     ],
     trend: signals.trend.map((t) => ({
       date: t.date,
@@ -382,12 +406,14 @@ function signalDriver(
   label: string,
   totals: QualitySignalTotals,
   sessions: QualitySignalTotals,
+  strength: QualityPatternDriver["strength"] = "strong",
 ): QualityPatternDriver {
   return {
     id,
     label,
     total: totals[id] ?? 0,
     sessions: sessions[id] ?? 0,
+    strength,
   };
 }
 
