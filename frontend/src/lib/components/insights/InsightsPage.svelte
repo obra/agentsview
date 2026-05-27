@@ -60,6 +60,13 @@
       ...summary.scoreDistribution.map((bucket) => bucket.count),
     ),
   );
+  const generationAgentNames = [
+    "claude",
+    "codex",
+    "copilot",
+    "gemini",
+    "kiro",
+  ] satisfies AgentName[];
   const agentOptions = $derived.by(() => {
     const opts = [...sessions.agents]
       .sort((a, b) => b.session_count - a.session_count)
@@ -79,25 +86,11 @@
       ...opts,
     ];
   });
-  const generationAgentOptions = $derived.by(() => {
-    const opts = [...sessions.agents]
-      .sort((a, b) => b.session_count - a.session_count)
-      .map((agent) => ({
-        name: agent.name,
-        label: `${agentLabel(agent.name)} (${agent.session_count})`,
-        displayLabel: agentLabel(agent.name),
-        count: agent.session_count,
-      }));
-    if (!opts.some((agent) => agent.name === insights.agent)) {
-      opts.unshift({
-        name: insights.agent,
-        label: agentLabel(insights.agent),
-        displayLabel: agentLabel(insights.agent),
-        count: 0,
-      });
-    }
-    return opts;
-  });
+  const generationAgentOptions = generationAgentNames.map((name) => ({
+    name,
+    label: agentLabel(name),
+    displayLabel: agentLabel(name),
+  }));
   const templateOptions = [
     { name: "prompt_maturity_review", label: "Prompt Maturity" },
     { name: "context_setup_review", label: "Context Setup" },
@@ -639,14 +632,14 @@
         </label>
 
         <label class="generated-control">
-          <span>Model agent</span>
+          <span>Generator</span>
           <OptionTypeahead
             options={generationAgentOptions}
             value={insights.agent}
             fallbackLabel={agentLabel(insights.agent)}
-            placeholder="Filter agents..."
-            title="Select model agent"
-            emptyLabel="No matching agents"
+            placeholder="Filter generators..."
+            title="Select generator"
+            emptyLabel="No matching generators"
             onselect={handleInsightAgentChange}
           />
         </label>

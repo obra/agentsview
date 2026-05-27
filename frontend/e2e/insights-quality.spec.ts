@@ -39,6 +39,7 @@ test.describe("Insights quality rollout", () => {
           agents: [
             { name: "claude", session_count: 8 },
             { name: "codex", session_count: 5 },
+            { name: "hermes", session_count: 3 },
           ],
         },
       }),
@@ -110,6 +111,20 @@ test.describe("Insights quality rollout", () => {
     await expect(
       page.getByRole("heading", { name: "Quality Patterns" }),
     ).toBeVisible();
+    await archive.getByTitle("Select generator").click();
+    await expect(
+      archive.getByRole("option", { name: "Codex", exact: true }),
+    ).toBeVisible();
+    await expect(
+      archive.getByRole("option", { name: "Copilot", exact: true }),
+    ).toBeVisible();
+    await expect(
+      archive.getByRole("option", { name: /Codex \(/ }),
+    ).toHaveCount(0);
+    await expect(
+      archive.getByRole("option", { name: /Hermes/ }),
+    ).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await expect(savedInsight).toBeVisible();
     await savedInsight.click();
     await expect(page).toHaveURL(/\/insights\?insight=42$/);
