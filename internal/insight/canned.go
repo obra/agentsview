@@ -818,6 +818,10 @@ func buildCoachWorkflowClusters(sessions []db.Session) []CannedCoachWorkflowClus
 		norm      string
 		tokens    []string
 	}
+	type clusterCandidate struct {
+		key     string
+		cluster CannedCoachWorkflowCluster
+	}
 	buckets := make(map[string][]rec)
 	for _, s := range sessions {
 		text := firstPromptText(s)
@@ -844,8 +848,8 @@ func buildCoachWorkflowClusters(sessions []db.Session) []CannedCoachWorkflowClus
 		})
 	}
 
-	var clusters []CannedCoachWorkflowCluster
-	for _, members := range buckets {
+	var candidates []clusterCandidate
+	for key, members := range buckets {
 		if len(members) < 3 {
 			continue
 		}
@@ -871,25 +875,45 @@ func buildCoachWorkflowClusters(sessions []db.Session) []CannedCoachWorkflowClus
 				examples = append(examples, truncateRunes(member.text, 150))
 			}
 		}
-		clusters = append(clusters, CannedCoachWorkflowCluster{
-			ID:          fmt.Sprintf("coach-workflow-%d", len(clusters)),
-			Label:       truncateRunes(label, 100),
-			Occurrences: len(members),
-			Sessions:    len(sessionIDs),
-			Projects:    sortedKeys(projects),
-			Examples:    examples,
+		candidates = append(candidates, clusterCandidate{
+			key: key,
+			cluster: CannedCoachWorkflowCluster{
+				ID:          coachWorkflowClusterID(key),
+				Label:       truncateRunes(label, 100),
+				Occurrences: len(members),
+				Sessions:    len(sessionIDs),
+				Projects:    sortedKeys(projects),
+				Examples:    examples,
+			},
 		})
 	}
-	sort.Slice(clusters, func(i, j int) bool {
-		if clusters[i].Occurrences != clusters[j].Occurrences {
-			return clusters[i].Occurrences > clusters[j].Occurrences
+	sort.Slice(candidates, func(i, j int) bool {
+		left := candidates[i].cluster
+		right := candidates[j].cluster
+		if left.Occurrences != right.Occurrences {
+			return left.Occurrences > right.Occurrences
 		}
-		return clusters[i].Label < clusters[j].Label
+		if left.Label != right.Label {
+			return left.Label < right.Label
+		}
+		if strings.Join(left.Projects, "\x00") != strings.Join(right.Projects, "\x00") {
+			return strings.Join(left.Projects, "\x00") < strings.Join(right.Projects, "\x00")
+		}
+		return candidates[i].key < candidates[j].key
 	})
+	clusters := make([]CannedCoachWorkflowCluster, 0, len(candidates))
+	for _, candidate := range candidates {
+		clusters = append(clusters, candidate.cluster)
+	}
 	if len(clusters) > 10 {
 		clusters = clusters[:10]
 	}
 	return clusters
+}
+
+func coachWorkflowClusterID(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return "coach-workflow-" + hex.EncodeToString(sum[:])[:12]
 }
 
 func firstPromptText(s db.Session) string {

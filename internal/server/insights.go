@@ -348,18 +348,11 @@ func (s *Server) buildCannedPayload(
 		CacheSavings:        usageResult.Totals.CacheSavings,
 		TopSessionsByCost:   topSessions,
 	}
-	sessionPage, err := s.db.ListSessions(ctx, db.SessionFilter{
-		DateFrom:         req.DateFrom,
-		DateTo:           req.DateTo,
-		Project:          req.Project,
-		ExcludeOneShot:   true,
-		ExcludeAutomated: true,
-		Limit:            db.MaxSessionLimit,
-	})
+	coachSessions, err := s.listCannedCoachSessions(ctx, req)
 	if err != nil {
 		return insight.CannedAggregatePayload{}, "", "", err
 	}
-	coachSummary := insight.BuildCannedCoachSummary(sessionPage.Sessions)
+	coachSummary := insight.BuildCannedCoachSummary(coachSessions)
 
 	payload := insight.CannedAggregatePayload{
 		Kind:     kind,
@@ -387,4 +380,30 @@ func (s *Server) buildCannedPayload(
 		return insight.CannedAggregatePayload{}, "", "", err
 	}
 	return payload, aggregateHash, cacheKey, nil
+}
+
+func (s *Server) listCannedCoachSessions(
+	ctx context.Context,
+	req generateInsightRequest,
+) ([]db.Session, error) {
+	filter := db.SessionFilter{
+		DateFrom:         req.DateFrom,
+		DateTo:           req.DateTo,
+		Project:          req.Project,
+		ExcludeOneShot:   true,
+		ExcludeAutomated: true,
+		Limit:            db.MaxSessionLimit,
+	}
+	var out []db.Session
+	for {
+		page, err := s.db.ListSessions(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page.Sessions...)
+		if page.NextCursor == "" {
+			return out, nil
+		}
+		filter.Cursor = page.NextCursor
+	}
 }

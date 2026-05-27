@@ -343,6 +343,55 @@ func TestGenerateCannedInsight_SaveCacheAndPreserveSignals(t *testing.T) {
 	}
 }
 
+func TestGenerateCannedInsight_CoachSummaryUsesAllPages(t *testing.T) {
+	var generatedPrompt string
+	stubGen := func(
+		_ context.Context, _ string, prompt string, _ insight.LogFunc,
+	) (insight.Result, error) {
+		generatedPrompt = prompt
+		return insight.Result{
+			Agent: "claude",
+			Model: "test-model",
+			Content: `{
+				"schema_version":"llm_insight.v1",
+				"kind":"prompt_maturity_review",
+				"summary":"Coach-derived prompt maturity evidence is available for the selected scope.",
+				"confidence":"medium",
+				"recommendations":[{
+					"title":"Tighten repeated implementation prompts",
+					"rationale":"The Coach prompt maturity aggregate covers the selected sessions without changing canonical scores.",
+					"actions":["Add explicit verification steps to repeated prompts"],
+					"evidence_refs":["coach:prompt_maturity"],
+					"impact":"medium",
+					"effort":"low"
+				}],
+				"risks":[],
+				"evidence_refs":["coach:prompt_maturity"]
+			}`,
+		}, nil
+	}
+	te := setupWithServerOpts(t, []server.Option{
+		server.WithGenerateStreamFunc(stubGen),
+	})
+	prompt := "Implement paged workflow review with acceptance criteria and verify output"
+	for i := range db.MaxSessionLimit + 1 {
+		te.seedSession(t, fmt.Sprintf("coach-%03d", i), "my-app", 3,
+			func(s *db.Session) {
+				s.FirstMessage = &prompt
+				s.HasToolCalls = true
+			})
+	}
+
+	w := te.post(t, "/api/v1/insights/generate",
+		`{"type":"llm_canned","kind":"prompt_maturity_review","date_from":"2025-01-15","date_to":"2025-01-15","project":"my-app","agent":"claude","llm_opt_in":true}`)
+
+	assertStatus(t, w, http.StatusOK)
+	if !strings.Contains(generatedPrompt, `"session_count":501`) {
+		t.Fatalf("generated prompt missing all-page Coach session count: %s",
+			generatedPrompt)
+	}
+}
+
 func TestGenerateCannedInsight_RejectsOversizedFocus(t *testing.T) {
 	te := setup(t)
 	longFocus := strings.Repeat("x", insight.MaxCannedFocusRunes+1)

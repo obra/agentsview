@@ -364,6 +364,37 @@ func TestBuildCannedCoachSummaryUsesCoachInsightFamilies(t *testing.T) {
 	}
 }
 
+func TestBuildCannedCoachSummaryStableWorkflowClusterIDs(t *testing.T) {
+	alpha := "Generate release notes for the current build and verify changelog links"
+	beta := "Review migration plan against acceptance criteria and verify rollback"
+	sessions := []db.Session{
+		{ID: "a1", Project: "app", FirstMessage: &alpha, UserMessageCount: 3},
+		{ID: "b1", Project: "api", FirstMessage: &beta, UserMessageCount: 3},
+		{ID: "a2", Project: "app", FirstMessage: &alpha, UserMessageCount: 3},
+		{ID: "b2", Project: "api", FirstMessage: &beta, UserMessageCount: 3},
+		{ID: "a3", Project: "app", FirstMessage: &alpha, UserMessageCount: 3},
+		{ID: "b3", Project: "api", FirstMessage: &beta, UserMessageCount: 3},
+	}
+	reversed := append([]db.Session(nil), sessions...)
+	for i, j := 0, len(reversed)-1; i < j; i, j = i+1, j-1 {
+		reversed[i], reversed[j] = reversed[j], reversed[i]
+	}
+
+	first := BuildCannedCoachSummary(sessions).WorkflowClusters
+	second := BuildCannedCoachSummary(reversed).WorkflowClusters
+
+	if len(first) != len(second) || len(first) != 2 {
+		t.Fatalf("cluster counts differ: first=%+v second=%+v", first, second)
+	}
+	for i := range first {
+		if first[i].ID == "" || first[i].ID != second[i].ID ||
+			first[i].Label != second[i].Label {
+			t.Fatalf("cluster %d not stable: first=%+v second=%+v",
+				i, first[i], second[i])
+		}
+	}
+}
+
 func TestCannedEvidenceRefsIncludesCoachSummary(t *testing.T) {
 	coach := &CannedCoachSummary{
 		SessionCount: 3,
