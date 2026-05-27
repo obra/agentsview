@@ -177,8 +177,8 @@
 <style>
   .typeahead {
     position: relative;
-    min-width: 180px;
-    max-width: 300px;
+    min-width: var(--typeahead-min-width, 180px);
+    max-width: var(--typeahead-max-width, 300px);
   }
 
   .typeahead-trigger {
@@ -241,6 +241,7 @@
     top: 100%;
     left: 0;
     right: 0;
+    min-width: var(--typeahead-list-min-width, 100%);
     margin-top: 2px;
     max-height: 50vh;
     overflow-y: auto;

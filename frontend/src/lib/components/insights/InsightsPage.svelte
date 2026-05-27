@@ -855,7 +855,9 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    min-width: 280px;
+    flex: 1 1 560px;
+    min-width: 0;
+    max-width: 720px;
   }
 
   .agent-select {
@@ -891,6 +893,17 @@
     min-width: 0;
     max-width: none;
     width: 100%;
+  }
+
+  .filter-group > :global(.typeahead:first-child) {
+    --typeahead-list-min-width: min(360px, calc(100vw - 32px));
+    flex: 1 1 240px;
+    min-width: 180px;
+    max-width: 340px;
+  }
+
+  .filter-group > :global(.typeahead:nth-child(2)) {
+    flex: 0 0 120px;
   }
 
   .icon-btn {
