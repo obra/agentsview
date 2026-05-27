@@ -1684,7 +1684,9 @@
     }
 
     .filter-group {
+      flex: 0 1 auto;
       min-width: 0;
+      width: 100%;
     }
 
     .section-heading p {
