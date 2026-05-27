@@ -71,6 +71,31 @@ func (pb *paramBuilder) add(v any) string {
 	return fmt.Sprintf("$%d", pb.n)
 }
 
+func normalizePGAutomatedScope(
+	scope string,
+	excludeAutomated bool,
+) string {
+	switch strings.TrimSpace(scope) {
+	case "human", "all", "automated":
+		return strings.TrimSpace(scope)
+	}
+	if excludeAutomated {
+		return "human"
+	}
+	return "all"
+}
+
+func pgAutomatedScopePredicate(scope, col string) string {
+	switch scope {
+	case "human":
+		return col + " = FALSE"
+	case "automated":
+		return col + " = TRUE"
+	default:
+		return ""
+	}
+}
+
 // pgActivityWindows holds the cutoff durations used by
 // pgTerminationPred. Kept in sync with the SQLite-side constants
 // in internal/db/sessions.go so both stores classify a session

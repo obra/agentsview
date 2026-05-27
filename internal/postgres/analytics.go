@@ -158,16 +158,18 @@ func buildAnalyticsWhereWithDate(
 			"user_message_count >= "+
 				pb.add(f.MinUserMessages))
 	}
+	scope := normalizePGAutomatedScope(
+		f.AutomatedScope, f.ExcludeAutomated)
 	if f.ExcludeOneShot {
-		if !f.ExcludeAutomated {
+		if scope != "human" {
 			preds = append(preds,
 				"(user_message_count > 1 OR is_automated = TRUE)")
 		} else {
 			preds = append(preds, "user_message_count > 1")
 		}
 	}
-	if f.ExcludeAutomated {
-		preds = append(preds, "is_automated = FALSE")
+	if pred := pgAutomatedScopePredicate(scope, "is_automated"); pred != "" {
+		preds = append(preds, pred)
 	}
 	if f.ActiveSince != "" {
 		preds = append(preds,

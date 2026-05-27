@@ -156,8 +156,8 @@
 
   function insightLinkPath(id: number): string {
     const params = new URLSearchParams();
-    if (router.params.desktop) {
-      params.set("desktop", router.params.desktop);
+    if (Object.hasOwn(router.params, "desktop")) {
+      params.set("desktop", router.params.desktop ?? "");
     }
     params.set("insight", String(id));
     return `${getBasePath()}/insights?${params.toString()}`;
@@ -837,16 +837,19 @@
   .toolbar {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 12px;
     padding: 8px 16px;
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border-muted);
     flex-shrink: 0;
+    min-height: 45px;
   }
 
   .filter-group {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     flex: 1 1 560px;
     min-width: 0;

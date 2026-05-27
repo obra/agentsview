@@ -126,11 +126,20 @@ func appendPGUsageSessionFilterClauses(
 		where += "\n\tAND s.user_message_count >= " +
 			pb.add(f.MinUserMessages)
 	}
+	scope := normalizePGAutomatedScope(
+		f.AutomatedScope, f.ExcludeAutomated)
 	if f.ExcludeOneShot {
-		where += "\n\tAND s.user_message_count > 1"
+		if scope == "human" {
+			where += "\n\tAND s.user_message_count > 1"
+		} else {
+			where += "\n\tAND (s.user_message_count > 1 OR COALESCE(s.is_automated, false) = TRUE)"
+		}
 	}
-	if f.ExcludeAutomated {
-		where += "\n\tAND COALESCE(s.is_automated, false) = false"
+	if pred := pgAutomatedScopePredicate(
+		scope,
+		"COALESCE(s.is_automated, false)",
+	); pred != "" {
+		where += "\n\tAND " + pred
 	}
 	if f.ActiveSince != "" {
 		where += "\n\tAND COALESCE(s.ended_at, s.started_at, s.created_at) >= " +

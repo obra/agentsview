@@ -189,6 +189,12 @@ class AnalyticsStore {
     this.hasNewData = true;
   }
 
+  private get effectiveAutomatedScope(): AutomatedScope {
+    if (!this.includeAutomated) return "human";
+    if (this.automatedScope === "human") return "all";
+    return this.automatedScope;
+  }
+
   clearAllFilters() {
     this.selectedDate = null;
     this.project = "";
@@ -379,7 +385,7 @@ class AnalyticsStore {
     if (this.includeOneShot) {
       p.includeOneShot = true;
     }
-    p.automatedScope = this.automatedScope;
+    p.automatedScope = this.effectiveAutomatedScope;
     if (this.recentlyActive) {
       p.activeSince = new Date(
         Date.now() - 24 * 60 * 60 * 1000,
@@ -420,7 +426,7 @@ class AnalyticsStore {
       if (this.includeOneShot) {
         p.includeOneShot = true;
       }
-      p.automatedScope = this.automatedScope;
+      p.automatedScope = this.effectiveAutomatedScope;
       if (this.recentlyActive) {
         p.activeSince = new Date(
           Date.now() - 24 * 60 * 60 * 1000,

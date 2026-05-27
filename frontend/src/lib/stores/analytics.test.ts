@@ -237,6 +237,9 @@ function resetStore() {
   analytics.selectedHour = null;
   analytics.project = "";
   analytics.machine = "";
+  analytics.agent = "";
+  analytics.includeAutomated = false;
+  analytics.automatedScope = "human";
   analytics.from = "2024-01-01";
   analytics.to = "2024-01-31";
   analytics.isPinned = false;
@@ -624,6 +627,28 @@ describe("AnalyticsStore machine filter", () => {
     expect(mock).toHaveBeenCalled();
     const params = mock.mock.lastCall?.[0];
     expect(params?.machine).toBe("host-a,host-b");
+  });
+});
+
+describe("AnalyticsStore automated scope params", () => {
+  it("derives all scope from legacy includeAutomated updates", () => {
+    analytics.includeAutomated = true;
+
+    analytics.fetchSummary();
+
+    expect(api.getAnalyticsSummary).toHaveBeenLastCalledWith(
+      expect.objectContaining({ automated_scope: "all" }),
+    );
+  });
+
+  it("keeps automated-only scope when selected explicitly", () => {
+    analytics.setAutomatedScope("automated");
+
+    analytics.fetchSummary();
+
+    expect(api.getAnalyticsSummary).toHaveBeenLastCalledWith(
+      expect.objectContaining({ automated_scope: "automated" }),
+    );
   });
 });
 
