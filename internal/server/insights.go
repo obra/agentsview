@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -360,6 +361,7 @@ func (s *Server) buildCannedPayload(
 		CacheReadTokens:     usageResult.Totals.CacheReadTokens,
 		TotalCost:           usageResult.Totals.TotalCost,
 		CacheSavings:        usageResult.Totals.CacheSavings,
+		ModelBreakdowns:     foldCannedModelBreakdowns(usageResult.Daily),
 		TopSessionsByCost:   topSessions,
 	}
 	coachSessions, err := s.listCannedCoachSessions(ctx, req)
@@ -396,6 +398,51 @@ func (s *Server) buildCannedPayload(
 		return insight.CannedAggregatePayload{}, "", "", err
 	}
 	return payload, aggregateHash, cacheKey, nil
+}
+
+func foldCannedModelBreakdowns(
+	daily []db.DailyUsageEntry,
+) []insight.CannedModelBreakdown {
+	type modelAccum struct {
+		inputTok  int
+		outputTok int
+		cacheCr   int
+		cacheRd   int
+		cost      float64
+	}
+	byModel := make(map[string]*modelAccum)
+	for _, day := range daily {
+		for _, model := range day.ModelBreakdowns {
+			acc, ok := byModel[model.ModelName]
+			if !ok {
+				acc = &modelAccum{}
+				byModel[model.ModelName] = acc
+			}
+			acc.inputTok += model.InputTokens
+			acc.outputTok += model.OutputTokens
+			acc.cacheCr += model.CacheCreationTokens
+			acc.cacheRd += model.CacheReadTokens
+			acc.cost += model.Cost
+		}
+	}
+	out := make([]insight.CannedModelBreakdown, 0, len(byModel))
+	for model, acc := range byModel {
+		out = append(out, insight.CannedModelBreakdown{
+			ModelName:           model,
+			InputTokens:         acc.inputTok,
+			OutputTokens:        acc.outputTok,
+			CacheCreationTokens: acc.cacheCr,
+			CacheReadTokens:     acc.cacheRd,
+			Cost:                acc.cost,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Cost != out[j].Cost {
+			return out[i].Cost > out[j].Cost
+		}
+		return out[i].ModelName < out[j].ModelName
+	})
+	return out
 }
 
 func (s *Server) listCannedCoachSessions(

@@ -422,3 +422,33 @@ func TestCannedEvidenceRefsIncludesCoachSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestCannedEvidenceRefsIncludesUsageModelBreakdown(t *testing.T) {
+	usage := &CannedUsageSummary{
+		InputTokens:  150,
+		OutputTokens: 30,
+		TotalCost:    0.04,
+		ModelBreakdowns: []CannedModelBreakdown{{
+			ModelName:   "claude-opus-4-7",
+			InputTokens: 100,
+			Cost:        0.03,
+		}},
+	}
+
+	refs := CannedEvidenceRefs(
+		db.SignalsAnalyticsResponse{}, usage, nil,
+	)
+	var ids []string
+	for _, ref := range refs {
+		ids = append(ids, ref.ID)
+	}
+	joined := strings.Join(ids, ",")
+	for _, want := range []string{
+		"usage:totals",
+		"usage:model_breakdown",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("refs missing %s: %v", want, ids)
+		}
+	}
+}

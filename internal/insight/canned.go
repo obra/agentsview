@@ -116,13 +116,23 @@ type CannedAggregatePayload struct {
 }
 
 type CannedUsageSummary struct {
-	InputTokens         int                  `json:"input_tokens"`
-	OutputTokens        int                  `json:"output_tokens"`
-	CacheCreationTokens int                  `json:"cache_creation_tokens"`
-	CacheReadTokens     int                  `json:"cache_read_tokens"`
-	TotalCost           float64              `json:"total_cost"`
-	CacheSavings        float64              `json:"cache_savings"`
-	TopSessionsByCost   []db.TopSessionEntry `json:"top_sessions_by_cost,omitempty"`
+	InputTokens         int                    `json:"input_tokens"`
+	OutputTokens        int                    `json:"output_tokens"`
+	CacheCreationTokens int                    `json:"cache_creation_tokens"`
+	CacheReadTokens     int                    `json:"cache_read_tokens"`
+	TotalCost           float64                `json:"total_cost"`
+	CacheSavings        float64                `json:"cache_savings"`
+	ModelBreakdowns     []CannedModelBreakdown `json:"model_breakdowns,omitempty"`
+	TopSessionsByCost   []db.TopSessionEntry   `json:"top_sessions_by_cost,omitempty"`
+}
+
+type CannedModelBreakdown struct {
+	ModelName           string  `json:"model_name"`
+	InputTokens         int     `json:"input_tokens"`
+	OutputTokens        int     `json:"output_tokens"`
+	CacheCreationTokens int     `json:"cache_creation_tokens"`
+	CacheReadTokens     int     `json:"cache_read_tokens"`
+	Cost                float64 `json:"cost"`
 }
 
 type CannedEvidenceRef struct {
@@ -1050,6 +1060,15 @@ func CannedEvidenceRefs(
 	usage *CannedUsageSummary,
 	coach *CannedCoachSummary,
 ) []CannedEvidenceRef {
+	usageHasData := usage != nil &&
+		(usage.InputTokens > 0 ||
+			usage.OutputTokens > 0 ||
+			usage.CacheCreationTokens > 0 ||
+			usage.CacheReadTokens > 0 ||
+			usage.TotalCost != 0 ||
+			usage.CacheSavings != 0 ||
+			len(usage.ModelBreakdowns) > 0 ||
+			len(usage.TopSessionsByCost) > 0)
 	refs := []CannedEvidenceRef{
 		{ID: "signals:score_distribution", Description: "Scored, unscored, average health score, and grade distribution."},
 		{ID: "signals:outcomes", Description: "Outcome and outcome confidence distribution."},
@@ -1065,6 +1084,9 @@ func CannedEvidenceRefs(
 	}
 	if usage != nil {
 		refs = append(refs, CannedEvidenceRef{ID: "usage:totals", Description: "Deterministic token, cache, and cost totals."})
+		if len(usage.ModelBreakdowns) > 0 {
+			refs = append(refs, CannedEvidenceRef{ID: "usage:model_breakdown", Description: "Deterministic per-model token and cost totals."})
+		}
 		if len(usage.TopSessionsByCost) > 0 {
 			refs = append(refs, CannedEvidenceRef{ID: "usage:top_sessions_by_cost", Description: "Deterministic top sessions by cost."})
 		}
@@ -1080,7 +1102,7 @@ func CannedEvidenceRefs(
 		}
 	}
 	if signals.ScoredSessions == 0 && signals.UnscoredSessions == 0 &&
-		(coach == nil || coach.SessionCount == 0) {
+		!usageHasData && (coach == nil || coach.SessionCount == 0) {
 		return []CannedEvidenceRef{{ID: "aggregate:empty", Description: "No deterministic aggregate rows matched the selected filters."}}
 	}
 	sort.Slice(refs, func(i, j int) bool { return refs[i].ID < refs[j].ID })

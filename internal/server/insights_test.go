@@ -381,6 +381,88 @@ func TestGenerateCannedInsight_SaveCacheAndPreserveSignals(t *testing.T) {
 	}
 }
 
+func TestGenerateCannedInsight_ModelCostPromptIncludesModelBreakdown(t *testing.T) {
+	var capturedPrompt string
+	stubGen := func(
+		_ context.Context, _, prompt string, _ insight.LogFunc,
+	) (insight.Result, error) {
+		capturedPrompt = prompt
+		return insight.Result{
+			Agent: "claude",
+			Model: "test-model",
+			Content: `{
+				"schema_version":"llm_insight.v1",
+				"kind":"model_cost_review",
+				"summary":"Model costs are concentrated in the supplied breakdown.",
+				"confidence":"high",
+				"recommendations":[{
+					"title":"Review the highest cost model",
+					"rationale":"The deterministic model breakdown identifies the cost concentration.",
+					"actions":["Compare the top model against lower-cost alternatives for routine tasks"],
+					"evidence_refs":["usage:model_breakdown"],
+					"impact":"medium",
+					"effort":"low"
+				}],
+				"risks":[],
+				"evidence_refs":["usage:model_breakdown"]
+			}`,
+		}, nil
+	}
+	te := setupWithServerOpts(t, []server.Option{
+		server.WithGenerateStreamFunc(stubGen),
+	})
+	if err := te.db.UpsertModelPricing([]db.ModelPricing{
+		{
+			ModelPattern:         "claude-opus-4-7",
+			InputPerMTok:         15,
+			OutputPerMTok:        75,
+			CacheCreationPerMTok: 18.75,
+			CacheReadPerMTok:     1.5,
+		},
+		{
+			ModelPattern:         "claude-sonnet-4-6",
+			InputPerMTok:         3,
+			OutputPerMTok:        15,
+			CacheCreationPerMTok: 3.75,
+			CacheReadPerMTok:     0.3,
+		},
+	}); err != nil {
+		t.Fatalf("UpsertModelPricing: %v", err)
+	}
+	te.seedSession(t, "usage-1", "my-app", 4)
+	te.seedMessages(t, "usage-1", 4, func(i int, m *db.Message) {
+		switch i {
+		case 1:
+			m.Model = "claude-opus-4-7"
+			m.TokenUsage = json.RawMessage(
+				`{"input_tokens":1000,"output_tokens":200,"cache_creation_input_tokens":100,"cache_read_input_tokens":50}`)
+		case 3:
+			m.Model = "claude-sonnet-4-6"
+			m.TokenUsage = json.RawMessage(
+				`{"input_tokens":2000,"output_tokens":300,"cache_creation_input_tokens":0,"cache_read_input_tokens":400}`)
+		}
+	})
+
+	payload := `{"type":"llm_canned","kind":"model_cost_review","date_from":"2025-01-15","date_to":"2025-01-15","project":"my-app","agent":"claude","llm_opt_in":true}`
+	w := te.post(t, "/api/v1/insights/generate", payload)
+	assertStatus(t, w, http.StatusOK)
+	assertBodyContains(t, w, "event: done")
+
+	for _, want := range []string{
+		`"model_breakdowns"`,
+		`"model_name":"claude-opus-4-7"`,
+		`"model_name":"claude-sonnet-4-6"`,
+		`usage:model_breakdown`,
+	} {
+		if !strings.Contains(capturedPrompt, want) {
+			t.Fatalf("prompt missing %q: %s", want, capturedPrompt)
+		}
+	}
+	if strings.Contains(capturedPrompt, "Model mix is not directly observable") {
+		t.Fatalf("prompt should include observable model mix: %s", capturedPrompt)
+	}
+}
+
 func TestGenerateCannedInsight_CoachSummaryUsesAllPages(t *testing.T) {
 	var generatedPrompt string
 	stubGen := func(
