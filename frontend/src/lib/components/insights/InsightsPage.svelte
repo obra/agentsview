@@ -893,9 +893,9 @@
 
   .filter-group > :global(.typeahead:first-child) {
     --typeahead-list-min-width: min(360px, calc(100vw - 32px));
-    flex: 1 1 240px;
+    flex: 0 1 220px;
     min-width: 180px;
-    max-width: 340px;
+    max-width: 260px;
   }
 
   .filter-group > :global(.typeahead:nth-child(2)) {
