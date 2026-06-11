@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -3647,8 +3648,8 @@ func firstToolUseMessage(
 func lastSessionMessage(
 	messages []SignalMessage,
 ) (string, *int, bool) {
-	for i := len(messages) - 1; i >= 0; i-- {
-		m := messages[i]
+	for _, v := range slices.Backward(messages) {
+		m := v
 		if m.IsSystem {
 			continue
 		}

@@ -102,8 +102,9 @@ func TestHTTPBackend_Get_Roundtrip(t *testing.T) {
 	assert.Equal(t, 2, detail.DuplicatePromptCount)
 	assert.True(t, detail.UnstructuredStart)
 	assert.Contains(t, detail.HealthScoreBasis, "prompt_quality")
+	assert.NotContains(t, detail.HealthPenalties, "repeated_prompts")
 	assert.Equal(t, 4,
-		detail.HealthPenalties["repeated_prompts"])
+		detail.HealthPenalties["stuck_repeated_prompts"])
 }
 
 func TestHTTPBackend_Get_NotFound(t *testing.T) {

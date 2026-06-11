@@ -353,12 +353,7 @@ func containsAnyWord(text string, words []string) bool {
 }
 
 func containsWord(text, word string) bool {
-	for _, token := range promptTokens(text) {
-		if token == word {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(promptTokens(text), word)
 }
 
 func isUnstructuredStart(content string) bool {

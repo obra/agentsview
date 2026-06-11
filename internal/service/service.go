@@ -116,7 +116,7 @@ func (d SessionDetail) MarshalJSON() ([]byte, error) {
 		HealthPenalties  map[string]int     `json:"health_penalties,omitempty"`
 	}{
 		sessionAlias:     sessionAlias(d.Session),
-		QualitySignals:   d.Session.StoredQualitySignals(),
+		QualitySignals:   d.StoredQualitySignals(),
 		HealthScoreBasis: d.HealthScoreBasis,
 		HealthPenalties:  d.HealthPenalties,
 	})
@@ -136,7 +136,7 @@ func (d *SessionDetail) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	d.Session = db.Session(v.sessionAlias)
-	d.Session.ApplyQualitySignals(v.QualitySignals)
+	d.ApplyQualitySignals(v.QualitySignals)
 	d.HealthScoreBasis = v.HealthScoreBasis
 	d.HealthPenalties = v.HealthPenalties
 	return nil

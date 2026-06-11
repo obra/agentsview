@@ -440,11 +440,9 @@ func RenderCannedMarkdown(
 	b.WriteString("## Summary\n\n")
 	b.WriteString(out.Summary)
 	b.WriteString("\n\n")
-	b.WriteString(fmt.Sprintf(
-		"_Kind: %s. Confidence: %s. Template: %s@%s. Aggregate: `%s`._\n\n",
+	fmt.Fprintf(&b, "_Kind: %s. Confidence: %s. Template: %s@%s. Aggregate: `%s`._\n\n",
 		out.Kind, out.Confidence, prov.TemplateID, prov.TemplateVersion,
-		shortHash(prov.AggregateHash),
-	))
+		shortHash(prov.AggregateHash))
 	b.WriteString("## Recommendations\n\n")
 	for i, rec := range out.Recommendations {
 		fmt.Fprintf(&b, "%d. **%s**\n", i+1, rec.Title)
@@ -973,7 +971,7 @@ func firstPromptText(s db.Session) string {
 func normalizeCoachPrompt(raw string) string {
 	lower := strings.ToLower(raw)
 	parts := strings.FieldsFunc(lower, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z')
+		return r < 'a' || r > 'z'
 	})
 	return strings.Join(parts, " ")
 }
@@ -996,7 +994,7 @@ func tokenizeCoachPrompt(normalized string) []string {
 		"like": true,
 	}
 	var out []string
-	for _, token := range strings.Fields(normalized) {
+	for token := range strings.FieldsSeq(normalized) {
 		if len(token) > 1 && !stop[token] {
 			out = append(out, token)
 		}

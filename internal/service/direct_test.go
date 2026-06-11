@@ -100,8 +100,8 @@ func TestDirectBackend_Get_HealthBreakdownIncludesHeuristics(
 
 	assert.Contains(t, detail.HealthScoreBasis, "prompt_quality")
 	assert.Contains(t, detail.HealthScoreBasis, "context_quality")
-	assert.Equal(t, 2,
-		detail.HealthPenalties["repeated_prompts"])
+	assert.NotContains(t, detail.HealthPenalties, "repeated_prompts")
+	assert.NotContains(t, detail.HealthPenalties, "stuck_repeated_prompts")
 	assert.Equal(t, 4,
 		detail.HealthPenalties["code_task_without_context"])
 }
