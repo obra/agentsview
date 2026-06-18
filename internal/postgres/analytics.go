@@ -131,28 +131,16 @@ func buildAnalyticsWhereWithDate(
 			dateCol+" <= "+pb.add(utcTo)+"::timestamptz")
 	}
 	if f.Machine != "" {
-		preds = append(preds,
-			"machine = "+pb.add(f.Machine))
+		preds = appendPGAnalyticsCSVFilter(
+			preds, "machine", f.Machine, pb)
 	}
 	if f.Project != "" {
 		preds = append(preds,
 			"project = "+pb.add(f.Project))
 	}
 	if f.Agent != "" {
-		agents := strings.Split(f.Agent, ",")
-		if len(agents) == 1 {
-			preds = append(preds,
-				"agent = "+pb.add(agents[0]))
-		} else {
-			phs := make([]string, len(agents))
-			for i, a := range agents {
-				phs[i] = pb.add(a)
-			}
-			preds = append(preds,
-				"agent IN ("+
-					strings.Join(phs, ",")+
-					")")
-		}
+		preds = appendPGAnalyticsCSVFilter(
+			preds, "agent", f.Agent, pb)
 	}
 	if f.MinUserMessages > 0 {
 		preds = append(preds,
@@ -182,6 +170,39 @@ func buildAnalyticsWhereWithDate(
 		preds = append(preds, pred)
 	}
 	return strings.Join(preds, " AND ")
+}
+
+func appendPGAnalyticsCSVFilter(
+	preds []string,
+	col string,
+	raw string,
+	pb *paramBuilder,
+) []string {
+	values := pgAnalyticsCSVValues(raw)
+	if len(values) == 0 {
+		return preds
+	}
+	if len(values) == 1 {
+		return append(preds, col+" = "+pb.add(values[0]))
+	}
+	phs := make([]string, len(values))
+	for i, value := range values {
+		phs[i] = pb.add(value)
+	}
+	return append(preds,
+		col+" IN ("+strings.Join(phs, ",")+")")
+}
+
+func pgAnalyticsCSVValues(raw string) []string {
+	values := strings.Split(raw, ",")
+	out := values[:0]
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // localTime parses a UTC timestamp string and converts it to

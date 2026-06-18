@@ -138,3 +138,26 @@ func TestPGAutomatedScopeOneShotExemption(t *testing.T) {
 		t.Fatalf("usage SQL missing one-shot exemption %q: %s", want, usageSQL)
 	}
 }
+
+func TestPGAnalyticsMachineMultiSelectPredicate(t *testing.T) {
+	pb := &paramBuilder{}
+	sql := buildAnalyticsWhereWithDate(
+		db.AnalyticsFilter{
+			Machine: " laptop,server ",
+		},
+		"created_at",
+		pb,
+		false,
+	)
+
+	want := "machine IN ($1,$2)"
+	if !strings.Contains(sql, want) {
+		t.Fatalf("analytics SQL missing machine IN predicate %q: %s", want, sql)
+	}
+	if strings.Contains(sql, "machine = ") {
+		t.Fatalf("analytics SQL used literal machine equality: %s", sql)
+	}
+	if len(pb.args) != 2 || pb.args[0] != "laptop" || pb.args[1] != "server" {
+		t.Fatalf("machine args = %#v, want [laptop server]", pb.args)
+	}
+}

@@ -172,15 +172,18 @@ func duckBuildAnalyticsWhere(
 		preds = append(preds, q("user_message_count")+" >= ?")
 		args = append(args, f.MinUserMessages)
 	}
+	scope := duckNormalizeAutomatedScope(
+		f.AutomatedScope, f.ExcludeAutomated)
 	if f.ExcludeOneShot {
-		if f.ExcludeAutomated {
-			preds = append(preds, q("user_message_count")+" > 1")
-		} else {
+		if scope != "human" {
 			preds = append(preds, "("+q("user_message_count")+" > 1 OR "+q("is_automated")+" = TRUE)")
+		} else {
+			preds = append(preds, q("user_message_count")+" > 1")
 		}
 	}
-	if f.ExcludeAutomated {
-		preds = append(preds, q("is_automated")+" = FALSE")
+	if pred := duckAutomatedScopePredicate(
+		scope, q("is_automated")); pred != "" {
+		preds = append(preds, pred)
 	}
 	if f.ActiveSince != "" {
 		activeSince := f.ActiveSince
@@ -206,6 +209,31 @@ func duckBuildAnalyticsWhere(
 	}
 
 	return strings.Join(preds, " AND "), args
+}
+
+func duckNormalizeAutomatedScope(
+	scope string,
+	excludeAutomated bool,
+) string {
+	switch strings.TrimSpace(scope) {
+	case "human", "all", "automated":
+		return strings.TrimSpace(scope)
+	}
+	if excludeAutomated {
+		return "human"
+	}
+	return "all"
+}
+
+func duckAutomatedScopePredicate(scope, col string) string {
+	switch scope {
+	case "human":
+		return col + " = FALSE"
+	case "automated":
+		return col + " = TRUE"
+	default:
+		return ""
+	}
 }
 
 func appendDuckAnalyticsCSVFilter(
