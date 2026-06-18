@@ -23,6 +23,11 @@ describe("UsagePage refresh behavior", () => {
     );
   });
 
+  it("treats termination as a usage URL session filter", () => {
+    expect(source).toContain('"termination",');
+    expect(source).toContain("filtersToParams(sessions.filters)");
+  });
+
   it("keeps the refresh timestamp beside the centered icon button", () => {
     const refreshControl =
       source.match(/\.refresh-control\s*{[^}]+}/)?.[0] ?? "";
