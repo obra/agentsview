@@ -19,6 +19,7 @@
     AgentName,
     AutomatedScope,
     CannedInsightKind,
+    InsightGenerationFilters,
     InsightType,
     SignalCalibration,
     SignalSessionExample,
@@ -152,13 +153,43 @@
     insights.promptText = textarea.value;
   }
 
+  function effectiveAutomatedScope(): AutomatedScope {
+    if (!analytics.includeAutomated) return "human";
+    if (analytics.automatedScope === "human") return "all";
+    return analytics.automatedScope;
+  }
+
+  function currentInsightFilters(): InsightGenerationFilters {
+    const filters: InsightGenerationFilters = {
+      timezone: analytics.timezone,
+      include_one_shot: analytics.includeOneShot,
+      automated_scope: effectiveAutomatedScope(),
+    };
+    if (analytics.machine) filters.machine = analytics.machine;
+    if (analytics.agent) filters.agent = analytics.agent;
+    if (analytics.termination) {
+      filters.termination = analytics.termination;
+    }
+    if (analytics.minUserMessages > 0) {
+      filters.min_user_messages = analytics.minUserMessages;
+    }
+    if (analytics.recentlyActive) {
+      filters.active_since = new Date(
+        Date.now() - 24 * 60 * 60 * 1000,
+      ).toISOString();
+    }
+    return filters;
+  }
+
   function handleGenerateCanned() {
     if (generationUnavailable) return;
+    const filters = currentInsightFilters();
     insights.setType("llm_canned");
     insights.setDateFrom(analytics.from);
     insights.setDateTo(analytics.to);
     insights.setProject(analytics.project);
-    insights.setAutomatedScope(analytics.automatedScope);
+    insights.setAutomatedScope(filters.automated_scope ?? "human");
+    insights.setSessionFilters(filters);
     insights.generate();
   }
 
@@ -539,6 +570,37 @@
   </header>
 
   <main class="content">
+    <section class="section-block" aria-labelledby="actions-title">
+      <div class="section-heading compact">
+        <div>
+          <div class="eyebrow">
+            <span class="badge rule">Rule-based</span>
+            <span>Next actions</span>
+          </div>
+          <h2 id="actions-title">Deterministic Recommendations</h2>
+        </div>
+      </div>
+
+      {#if recommendations.length === 0}
+        <div class="state-panel compact-state">
+          <strong>No rule-based actions are firing.</strong>
+          <span>
+            Patterns are clear or unavailable for the current filters.
+          </span>
+        </div>
+      {:else}
+        <div class="recommendation-list">
+          {#each recommendations as rec}
+            <article class="recommendation">
+              <span class="badge rule">Rule-based</span>
+              <strong>{rec.label}</strong>
+              <p>{rec.rationale}</p>
+            </article>
+          {/each}
+        </div>
+      {/if}
+    </section>
+
     <section class="section-block" aria-labelledby="facts-title">
       <div class="section-heading">
         <div>
@@ -764,37 +826,6 @@
             {/if}
           </section>
         {/if}
-      {/if}
-    </section>
-
-    <section class="section-block" aria-labelledby="actions-title">
-      <div class="section-heading compact">
-        <div>
-          <div class="eyebrow">
-            <span class="badge rule">Rule-based</span>
-            <span>Next actions</span>
-          </div>
-          <h2 id="actions-title">Deterministic Recommendations</h2>
-        </div>
-      </div>
-
-      {#if recommendations.length === 0}
-        <div class="state-panel compact-state">
-          <strong>No rule-based actions are firing.</strong>
-          <span>
-            Patterns are clear or unavailable for the current filters.
-          </span>
-        </div>
-      {:else}
-        <div class="recommendation-list">
-          {#each recommendations as rec}
-            <article class="recommendation">
-              <span class="badge rule">Rule-based</span>
-              <strong>{rec.label}</strong>
-              <p>{rec.rationale}</p>
-            </article>
-          {/each}
-        </div>
       {/if}
     </section>
 

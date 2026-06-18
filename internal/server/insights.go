@@ -23,16 +23,17 @@ var validInsightTypes = map[string]bool{
 }
 
 type generateInsightRequest struct {
-	Type           string `json:"type"`
-	DateFrom       string `json:"date_from"`
-	DateTo         string `json:"date_to"`
-	Project        string `json:"project,omitempty"`
-	Prompt         string `json:"prompt,omitempty"`
-	Agent          string `json:"agent,omitempty"`
-	Kind           string `json:"kind,omitempty"`
-	LLMOptIn       bool   `json:"llm_opt_in,omitempty"`
-	ForceRefresh   bool   `json:"force_refresh,omitempty"`
-	AutomatedScope string `json:"automated_scope,omitempty"`
+	Type           string                        `json:"type"`
+	DateFrom       string                        `json:"date_from"`
+	DateTo         string                        `json:"date_to"`
+	Project        string                        `json:"project,omitempty"`
+	Prompt         string                        `json:"prompt,omitempty"`
+	Agent          string                        `json:"agent,omitempty"`
+	Kind           string                        `json:"kind,omitempty"`
+	LLMOptIn       bool                          `json:"llm_opt_in,omitempty"`
+	ForceRefresh   bool                          `json:"force_refresh,omitempty"`
+	AutomatedScope string                        `json:"automated_scope,omitempty"`
+	Filters        *insight.CannedSessionFilters `json:"filters,omitempty"`
 }
 
 func normalizeInsightAutomatedScope(scope string) (string, bool) {
@@ -44,6 +45,47 @@ func normalizeInsightAutomatedScope(scope string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func normalizeCannedSessionFilters(
+	req generateInsightRequest,
+) (insight.CannedSessionFilters, string, bool) {
+	filters := insight.CannedSessionFilters{
+		Timezone:       "UTC",
+		AutomatedScope: req.AutomatedScope,
+	}
+	if req.Filters != nil {
+		filters = *req.Filters
+	}
+	filters.Timezone = strings.TrimSpace(filters.Timezone)
+	if filters.Timezone == "" {
+		filters.Timezone = "UTC"
+	}
+	filters.Machine = strings.TrimSpace(filters.Machine)
+	filters.Agent = strings.TrimSpace(filters.Agent)
+	filters.Termination = strings.TrimSpace(filters.Termination)
+	filters.ActiveSince = strings.TrimSpace(filters.ActiveSince)
+	if filters.MinUserMessages < 0 {
+		return insight.CannedSessionFilters{},
+			"filters.min_user_messages must be >= 0", false
+	}
+	if filters.ActiveSince != "" &&
+		!timeutil.IsValidTimestamp(filters.ActiveSince) {
+		return insight.CannedSessionFilters{},
+			"filters.active_since must be RFC3339 timestamp", false
+	}
+	scopeInput := filters.AutomatedScope
+	if strings.TrimSpace(scopeInput) == "" {
+		scopeInput = req.AutomatedScope
+	}
+	scope, ok := normalizeInsightAutomatedScope(scopeInput)
+	if !ok {
+		return insight.CannedSessionFilters{},
+			"filters.automated_scope must be human, all, or automated",
+			false
+	}
+	filters.AutomatedScope = scope
+	return filters, "", true
 }
 
 func insightGenerateClientMessage(
@@ -105,6 +147,12 @@ func (s *Server) humaGenerateCannedInsight(
 			"invalid agent: must be one of "+
 				strings.Join(insight.ValidAgentNames, ", "))
 	}
+	filters, message, ok := normalizeCannedSessionFilters(req)
+	if !ok {
+		return nil, apiError(http.StatusBadRequest, message)
+	}
+	req.Filters = &filters
+	req.AutomatedScope = filters.AutomatedScope
 
 	return &huma.StreamResponse{Body: func(hctx huma.Context) {
 		stream, ok := newHumaSSEStream(hctx)
@@ -327,13 +375,25 @@ func (s *Server) buildCannedPayload(
 	kind insight.CannedKind,
 	req generateInsightRequest,
 ) (insight.CannedAggregatePayload, string, string, error) {
-	analyticsFilter := db.AnalyticsFilter{
-		From:           req.DateFrom,
-		To:             req.DateTo,
-		Project:        req.Project,
+	filters := insight.CannedSessionFilters{
 		Timezone:       "UTC",
-		ExcludeOneShot: true,
 		AutomatedScope: req.AutomatedScope,
+	}
+	if req.Filters != nil {
+		filters = *req.Filters
+	}
+	analyticsFilter := db.AnalyticsFilter{
+		From:            req.DateFrom,
+		To:              req.DateTo,
+		Project:         req.Project,
+		Machine:         filters.Machine,
+		Agent:           filters.Agent,
+		Timezone:        filters.Timezone,
+		MinUserMessages: filters.MinUserMessages,
+		ExcludeOneShot:  !filters.IncludeOneShot,
+		AutomatedScope:  filters.AutomatedScope,
+		ActiveSince:     filters.ActiveSince,
+		Termination:     filters.Termination,
 	}
 	signals, err := s.db.GetAnalyticsSignals(ctx, analyticsFilter)
 	if err != nil {
@@ -341,13 +401,18 @@ func (s *Server) buildCannedPayload(
 	}
 
 	usageFilter := db.UsageFilter{
-		From:           req.DateFrom,
-		To:             req.DateTo,
-		Project:        req.Project,
-		Timezone:       "UTC",
-		ExcludeOneShot: true,
-		AutomatedScope: req.AutomatedScope,
-		Breakdowns:     false,
+		From:            req.DateFrom,
+		To:              req.DateTo,
+		Project:         req.Project,
+		Machine:         filters.Machine,
+		Agent:           filters.Agent,
+		Timezone:        filters.Timezone,
+		MinUserMessages: filters.MinUserMessages,
+		ExcludeOneShot:  !filters.IncludeOneShot,
+		AutomatedScope:  filters.AutomatedScope,
+		ActiveSince:     filters.ActiveSince,
+		Termination:     filters.Termination,
+		Breakdowns:      false,
 	}
 	usageResult, err := s.db.GetDailyUsage(ctx, usageFilter)
 	if err != nil {
@@ -378,7 +443,8 @@ func (s *Server) buildCannedPayload(
 		DateFrom:       req.DateFrom,
 		DateTo:         req.DateTo,
 		Project:        req.Project,
-		AutomatedScope: req.AutomatedScope,
+		AutomatedScope: filters.AutomatedScope,
+		Filters:        filters,
 		Focus:          req.Prompt,
 		Signals:        signals,
 		Usage:          usageSummary,
@@ -395,7 +461,8 @@ func (s *Server) buildCannedPayload(
 	cacheKey, err := insight.CannedCacheKey(
 		kind, req.DateFrom, req.DateTo, req.Project,
 		req.Agent, req.Prompt, aggregateHash,
-		req.AutomatedScope,
+		filters.AutomatedScope,
+		filters,
 	)
 	if err != nil {
 		return insight.CannedAggregatePayload{}, "", "", err
@@ -452,13 +519,25 @@ func (s *Server) listCannedCoachSessions(
 	ctx context.Context,
 	req generateInsightRequest,
 ) ([]db.Session, error) {
-	filter := db.SessionFilter{
-		DateFrom:       req.DateFrom,
-		DateTo:         req.DateTo,
-		Project:        req.Project,
-		ExcludeOneShot: true,
+	filters := insight.CannedSessionFilters{
+		Timezone:       "UTC",
 		AutomatedScope: req.AutomatedScope,
-		Limit:          db.MaxSessionLimit,
+	}
+	if req.Filters != nil {
+		filters = *req.Filters
+	}
+	filter := db.SessionFilter{
+		DateFrom:        req.DateFrom,
+		DateTo:          req.DateTo,
+		Project:         req.Project,
+		Machine:         filters.Machine,
+		Agent:           filters.Agent,
+		ActiveSince:     filters.ActiveSince,
+		MinUserMessages: filters.MinUserMessages,
+		ExcludeOneShot:  !filters.IncludeOneShot,
+		AutomatedScope:  filters.AutomatedScope,
+		Termination:     filters.Termination,
+		Limit:           db.MaxSessionLimit,
 	}
 	var out []db.Session
 	for {

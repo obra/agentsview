@@ -569,6 +569,100 @@ func TestGenerateCannedInsight_AutomatedScopeOnlyAutomated(t *testing.T) {
 	}
 }
 
+func TestGenerateCannedInsight_UsesSessionFilterPayload(t *testing.T) {
+	var calls atomic.Int32
+	var generatedPrompts []string
+	stubGen := func(
+		_ context.Context, _ string, prompt string, _ insight.LogFunc,
+	) (insight.Result, error) {
+		calls.Add(1)
+		generatedPrompts = append(generatedPrompts, prompt)
+		return insight.Result{
+			Agent: "claude",
+			Model: "test-model",
+			Content: `{
+				"schema_version":"llm_insight.v1",
+				"kind":"prompt_maturity_review",
+				"summary":"Prompt maturity evidence is scoped to the active dashboard filters.",
+				"confidence":"medium",
+				"recommendations":[{
+					"title":"Keep filtered recommendations scoped",
+					"rationale":"The Coach prompt maturity aggregate covers only the selected session cohort.",
+					"actions":["Generate recommendations from the same filters used by the dashboard"],
+					"evidence_refs":["coach:prompt_maturity"],
+					"impact":"medium",
+					"effort":"low"
+				}],
+				"risks":[],
+				"evidence_refs":["coach:prompt_maturity"]
+			}`,
+		}, nil
+	}
+	te := setupWithServerOpts(t, []server.Option{
+		server.WithGenerateStreamFunc(stubGen),
+	})
+	clean := "clean"
+	codexPrompt := "Implement filtered recommendations with acceptance criteria and verification"
+	claudePrompt := "Implement agent-specific recommendations with acceptance criteria and verification"
+	wrongMachinePrompt := "Implement workstation filter bypass with acceptance criteria"
+	oneShotPrompt := "Fix it"
+	te.seedSession(t, "codex-match", "my-app", 4, func(s *db.Session) {
+		s.Agent = "codex"
+		s.Machine = "workstation"
+		s.UserMessageCount = 3
+		s.FirstMessage = &codexPrompt
+		s.HasToolCalls = true
+		s.TerminationStatus = &clean
+	})
+	te.seedSession(t, "claude-match", "my-app", 4, func(s *db.Session) {
+		s.Agent = "claude"
+		s.Machine = "workstation"
+		s.UserMessageCount = 3
+		s.FirstMessage = &claudePrompt
+		s.HasToolCalls = true
+		s.TerminationStatus = &clean
+	})
+	te.seedSession(t, "wrong-machine", "my-app", 4, func(s *db.Session) {
+		s.Agent = "codex"
+		s.Machine = "other-host"
+		s.UserMessageCount = 3
+		s.FirstMessage = &wrongMachinePrompt
+		s.HasToolCalls = true
+		s.TerminationStatus = &clean
+	})
+	te.seedSession(t, "one-shot", "my-app", 1, func(s *db.Session) {
+		s.Agent = "codex"
+		s.Machine = "workstation"
+		s.UserMessageCount = 1
+		s.FirstMessage = &oneShotPrompt
+		s.HasToolCalls = true
+		s.TerminationStatus = &clean
+	})
+
+	firstPayload := `{"type":"llm_canned","kind":"prompt_maturity_review","date_from":"2025-01-15","date_to":"2025-01-15","project":"my-app","agent":"claude","llm_opt_in":true,"filters":{"timezone":"America/New_York","agent":"codex","machine":"workstation","termination":"clean","min_user_messages":2,"include_one_shot":false,"automated_scope":"human"}}`
+	w := te.post(t, "/api/v1/insights/generate", firstPayload)
+	assertStatus(t, w, http.StatusOK)
+	require.Equal(t, int32(1), calls.Load())
+	require.Len(t, generatedPrompts, 1)
+	assert.Contains(t, generatedPrompts[0], `"timezone":"America/New_York"`)
+	assert.Contains(t, generatedPrompts[0], `"agent":"codex"`)
+	assert.Contains(t, generatedPrompts[0], `"session_count":1`)
+	assert.Contains(t, generatedPrompts[0], codexPrompt)
+	assert.NotContains(t, generatedPrompts[0], claudePrompt)
+	assert.NotContains(t, generatedPrompts[0], wrongMachinePrompt)
+	assert.NotContains(t, generatedPrompts[0], oneShotPrompt)
+
+	secondPayload := `{"type":"llm_canned","kind":"prompt_maturity_review","date_from":"2025-01-15","date_to":"2025-01-15","project":"my-app","agent":"claude","llm_opt_in":true,"filters":{"timezone":"America/New_York","agent":"claude","machine":"workstation","termination":"clean","min_user_messages":2,"include_one_shot":false,"automated_scope":"human"}}`
+	w = te.post(t, "/api/v1/insights/generate", secondPayload)
+	assertStatus(t, w, http.StatusOK)
+	require.Equal(t, int32(2), calls.Load())
+	require.Len(t, generatedPrompts, 2)
+	assert.Contains(t, generatedPrompts[1], `"agent":"claude"`)
+	assert.Contains(t, generatedPrompts[1], `"session_count":1`)
+	assert.Contains(t, generatedPrompts[1], claudePrompt)
+	assert.NotContains(t, generatedPrompts[1], codexPrompt)
+}
+
 func TestGenerateCannedInsight_RejectsOversizedFocus(t *testing.T) {
 	te := setup(t)
 	longFocus := strings.Repeat("x", insight.MaxCannedFocusRunes+1)

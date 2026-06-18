@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wesm/agentsview/internal/db"
+	"go.kenn.io/agentsview/internal/db"
 )
 
 func TestPGAutomatedScopePredicates(t *testing.T) {
@@ -82,9 +82,9 @@ func TestPGAutomatedScopePredicates(t *testing.T) {
 		{
 			name:  "usage automated",
 			scope: "automated",
-			want:  "COALESCE(u.is_automated, false) = TRUE",
+			want:  "COALESCE(s.is_automated, false) = TRUE",
 			buildSQL: func(scope string, exclude bool) string {
-				sql, _ := appendPGUsageRowFilterClauses(
+				sql := appendPGUsageSessionFilterClauses(
 					"WHERE true",
 					&paramBuilder{},
 					db.UsageFilter{
@@ -125,7 +125,7 @@ func TestPGAutomatedScopeOneShotExemption(t *testing.T) {
 		t.Fatalf("analytics SQL missing one-shot exemption %q: %s", want, sql)
 	}
 
-	usageSQL, _ := appendPGUsageRowFilterClauses(
+	usageSQL := appendPGUsageSessionFilterClauses(
 		"WHERE true",
 		&paramBuilder{},
 		db.UsageFilter{
@@ -133,7 +133,7 @@ func TestPGAutomatedScopeOneShotExemption(t *testing.T) {
 			ExcludeOneShot: true,
 		},
 	)
-	want = "(u.user_message_count > 1 OR COALESCE(u.is_automated, false) = TRUE)"
+	want = "(s.user_message_count > 1 OR COALESCE(s.is_automated, false) = TRUE)"
 	if !strings.Contains(usageSQL, want) {
 		t.Fatalf("usage SQL missing one-shot exemption %q: %s", want, usageSQL)
 	}

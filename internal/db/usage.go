@@ -37,6 +37,7 @@ type UsageFilter struct {
 	ExcludeAutomated bool   // is_automated = false
 	AutomatedScope   string // "", "human", "all", or "automated"
 	ActiveSince      string // RFC3339 session recency cutoff
+	Termination      string // "", "clean", "unclean", "active", or "stale"
 	Breakdowns       bool   // populate Project/AgentBreakdowns per day
 }
 
@@ -144,8 +145,52 @@ func (f UsageFilter) appendUsageSessionFilterClauses(
 		where += "\n\tAND COALESCE(s.ended_at, s.started_at, s.created_at) >= ?"
 		args = append(args, f.ActiveSince)
 	}
+	if pred, pargs := buildUsageTerminationPredSQLite(f.Termination); pred != "" {
+		where += "\n\tAND " + pred
+		args = append(args, pargs...)
+	}
 
 	return where, args
+}
+
+func buildUsageTerminationPredSQLite(status string) (string, []any) {
+	if status == "" || status == "all" {
+		return "", nil
+	}
+	now := time.Now().Unix()
+	activeCutoff := now - int64(activeWindow.Seconds())
+	staleCutoff := now - int64(staleWindow.Seconds())
+	const activityExpr = "CAST(strftime('%s', COALESCE(s.ended_at, s.started_at, s.created_at)) AS INTEGER)"
+	const flagged = "s.termination_status IN ('tool_call_pending', 'truncated')"
+
+	parts := strings.Split(status, ",")
+	preds := make([]string, 0, len(parts))
+	args := make([]any, 0, len(parts)*2)
+	for _, p := range parts {
+		switch strings.TrimSpace(p) {
+		case "active":
+			preds = append(preds, activityExpr+" > ?")
+			args = append(args, activeCutoff)
+		case "stale":
+			preds = append(preds, "("+activityExpr+" > ? AND "+
+				activityExpr+" <= ? AND "+flagged+")")
+			args = append(args, staleCutoff, activeCutoff)
+		case "unclean":
+			preds = append(preds, "("+activityExpr+" <= ? AND "+flagged+")")
+			args = append(args, staleCutoff)
+		case "clean":
+			preds = append(preds, "s.termination_status = 'clean'")
+		case "awaiting_user":
+			preds = append(preds, "s.termination_status = 'awaiting_user'")
+		}
+	}
+	if len(preds) == 0 {
+		return "", nil
+	}
+	if len(preds) == 1 {
+		return preds[0], args
+	}
+	return "(" + strings.Join(preds, " OR ") + ")", args
 }
 
 // location loads the timezone or returns the system local timezone.
@@ -219,6 +264,7 @@ SELECT
 	s.user_message_count,
 	COALESCE(s.is_automated, 0) AS is_automated,
 	COALESCE(s.ended_at, s.started_at, s.created_at) AS session_activity_at,
+	COALESCE(s.termination_status, '') AS termination_status,
 	COALESCE(NULLIF(COALESCE(s.display_name, s.session_name), ''), NULLIF(s.first_message, ''), NULLIF(s.project, ''), s.id) AS display_name,
 	COALESCE(s.started_at, '') AS started_at
 FROM messages m
@@ -254,6 +300,7 @@ SELECT
 	s.user_message_count,
 	COALESCE(s.is_automated, 0) AS is_automated,
 	COALESCE(s.ended_at, s.started_at, s.created_at) AS session_activity_at,
+	COALESCE(s.termination_status, '') AS termination_status,
 	COALESCE(NULLIF(COALESCE(s.display_name, s.session_name), ''), NULLIF(s.first_message, ''), NULLIF(s.project, ''), s.id) AS display_name,
 	COALESCE(s.started_at, '') AS started_at
 FROM usage_events ue
@@ -466,6 +513,7 @@ type usageScanRow struct {
 	userMessageCount         int
 	isAutomated              int
 	sessionActivityAt        string
+	terminationStatus        string
 	displayName              string
 	startedAt                string
 }
@@ -522,6 +570,7 @@ SELECT
 	u.user_message_count,
 	u.is_automated,
 	u.session_activity_at,
+	u.termination_status,
 	u.display_name,
 	u.started_at
 FROM (` + rowsSQL + `) u
@@ -712,6 +761,7 @@ func scanUsageRow(rows *sql.Rows) (usageScanRow, error) {
 		&r.userMessageCount,
 		&r.isAutomated,
 		&r.sessionActivityAt,
+		&r.terminationStatus,
 		&r.displayName,
 		&r.startedAt,
 	)

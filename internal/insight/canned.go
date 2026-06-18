@@ -9,10 +9,11 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/wesm/agentsview/internal/db"
+	"go.kenn.io/agentsview/internal/db"
 )
 
 const (
@@ -108,11 +109,46 @@ type CannedAggregatePayload struct {
 	DateTo         string                      `json:"date_to"`
 	Project        string                      `json:"project,omitempty"`
 	AutomatedScope string                      `json:"automated_scope"`
+	Filters        CannedSessionFilters        `json:"filters"`
 	Focus          string                      `json:"focus,omitempty"`
 	Signals        db.SignalsAnalyticsResponse `json:"signals"`
 	Usage          *CannedUsageSummary         `json:"usage,omitempty"`
 	Coach          *CannedCoachSummary         `json:"coach,omitempty"`
 	EvidenceRefs   []CannedEvidenceRef         `json:"evidence_refs"`
+}
+
+type CannedSessionFilters struct {
+	Timezone        string `json:"timezone"`
+	Machine         string `json:"machine,omitempty"`
+	Agent           string `json:"agent,omitempty"`
+	Termination     string `json:"termination,omitempty"`
+	MinUserMessages int    `json:"min_user_messages,omitempty"`
+	IncludeOneShot  bool   `json:"include_one_shot"`
+	AutomatedScope  string `json:"automated_scope"`
+	ActiveSince     string `json:"active_since,omitempty"`
+}
+
+func (f CannedSessionFilters) ProvenanceMap(project string) map[string]string {
+	out := map[string]string{
+		"project":           project,
+		"timezone":          f.Timezone,
+		"include_one_shot":  strconv.FormatBool(f.IncludeOneShot),
+		"automated_scope":   f.AutomatedScope,
+		"min_user_messages": strconv.Itoa(f.MinUserMessages),
+	}
+	if f.Machine != "" {
+		out["machine"] = f.Machine
+	}
+	if f.Agent != "" {
+		out["agent"] = f.Agent
+	}
+	if f.Termination != "" {
+		out["termination"] = f.Termination
+	}
+	if f.ActiveSince != "" {
+		out["active_since"] = f.ActiveSince
+	}
+	return out
 }
 
 type CannedUsageSummary struct {
@@ -248,12 +284,18 @@ func CannedCacheKey(
 	kind CannedKind,
 	dateFrom, dateTo, project, requestedAgent, focus, aggregateHash string,
 	automatedScope string,
+	filters CannedSessionFilters,
 ) (string, error) {
 	t, ok := CannedTemplate(kind)
 	if !ok {
 		return "", fmt.Errorf("unknown canned insight kind: %s", kind)
 	}
 	focusSum := sha256.Sum256([]byte(strings.TrimSpace(focus)))
+	filterData, err := canonicalJSON(filters)
+	if err != nil {
+		return "", err
+	}
+	filterSum := sha256.Sum256(filterData)
 	input := map[string]string{
 		"kind":             string(kind),
 		"date_from":        dateFrom,
@@ -265,6 +307,7 @@ func CannedCacheKey(
 		"aggregate_hash":   aggregateHash,
 		"focus_hash":       hex.EncodeToString(focusSum[:]),
 		"automated_scope":  automatedScope,
+		"filter_hash":      hex.EncodeToString(filterSum[:]),
 	}
 	data, err := canonicalJSON(input)
 	if err != nil {
@@ -491,12 +534,9 @@ func NewCannedProvenance(
 		DateFrom:        payload.DateFrom,
 		DateTo:          payload.DateTo,
 		Project:         payload.Project,
-		Filters: map[string]string{
-			"project":         payload.Project,
-			"automated_scope": payload.AutomatedScope,
-		},
-		Agent: agent,
-		Model: model,
+		Filters:         payload.Filters.ProvenanceMap(payload.Project),
+		Agent:           agent,
+		Model:           model,
 		SourceVersions: map[string]string{
 			"signals_analytics": "v1",
 			"usage_analytics":   "v1",

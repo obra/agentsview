@@ -5,6 +5,7 @@ import type {
   AgentName,
   CannedInsightKind,
   AutomatedScope,
+  InsightGenerationFilters,
 } from "../api/types.js";
 import {
   ApiError as GeneratedApiError,
@@ -34,6 +35,7 @@ export interface InsightTask {
   kind?: CannedInsightKind;
   promptText: string;
   automatedScope: AutomatedScope;
+  sessionFilters?: InsightGenerationFilters;
   status: "generating" | "done" | "error";
   phase: string;
   error: string | null;
@@ -52,6 +54,7 @@ interface GenerationSnapshot {
   kind?: CannedInsightKind;
   promptText: string;
   automatedScope: AutomatedScope;
+  sessionFilters?: InsightGenerationFilters;
 }
 
 class InsightsStore {
@@ -62,6 +65,7 @@ class InsightsStore {
   project: string = $state("");
   agent: AgentName = $state("claude");
   automatedScope: AutomatedScope = $state("human");
+  sessionFilters: InsightGenerationFilters | undefined = $state();
   items: Insight[] = $state([]);
   selectedId: number | null = $state(null);
   selectedTaskId: string | null = $state(null);
@@ -148,6 +152,12 @@ class InsightsStore {
     this.automatedScope = scope;
   }
 
+  setSessionFilters(filters?: InsightGenerationFilters) {
+    this.sessionFilters = filters
+      ? { ...filters }
+      : undefined;
+  }
+
   select(id: number) {
     this.selectedId = id;
     this.selectedTaskId = null;
@@ -170,6 +180,9 @@ class InsightsStore {
         : undefined,
       promptText: this.promptText,
       automatedScope: this.automatedScope,
+      sessionFilters: this.sessionFilters
+        ? { ...this.sessionFilters }
+        : undefined,
     });
   }
 
@@ -186,6 +199,9 @@ class InsightsStore {
         kind: task.kind,
         promptText: task.promptText,
         automatedScope: task.automatedScope,
+        sessionFilters: task.sessionFilters
+          ? { ...task.sessionFilters }
+          : undefined,
       },
       clientId,
       true,
@@ -207,6 +223,9 @@ class InsightsStore {
       kind: snap.kind,
       promptText: snap.promptText,
       automatedScope: snap.automatedScope,
+      sessionFilters: snap.sessionFilters
+        ? { ...snap.sessionFilters }
+        : undefined,
       status: "generating",
       phase: "generating",
       error: null,
@@ -238,6 +257,9 @@ class InsightsStore {
           ? true
           : undefined,
         automated_scope: snap.automatedScope,
+        ...(snap.type === "llm_canned" && snap.sessionFilters
+          ? { filters: snap.sessionFilters }
+          : {}),
       },
       (phase) => {
         this.tasks = this.tasks.map((t) =>

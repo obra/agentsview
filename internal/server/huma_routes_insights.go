@@ -103,7 +103,10 @@ func (s *Server) humaGenerateInsight(
 	req := in.Body
 	if !validInsightTypes[req.Type] {
 		return nil, apiError(http.StatusBadRequest,
-			"invalid type: must be daily_activity or agent_analysis")
+			"invalid type: must be daily_activity, agent_analysis, or llm_canned")
+	}
+	if req.Type == insight.CannedType {
+		return s.humaGenerateCannedInsight(req)
 	}
 	if !timeutil.IsValidDate(req.DateFrom) {
 		return nil, apiError(http.StatusBadRequest,
@@ -125,6 +128,12 @@ func (s *Server) humaGenerateInsight(
 			"invalid agent: must be one of "+
 				strings.Join(insight.ValidAgentNames, ", "))
 	}
+	scope, ok := normalizeInsightAutomatedScope(req.AutomatedScope)
+	if !ok {
+		return nil, apiError(http.StatusBadRequest,
+			"automated_scope must be human, all, or automated")
+	}
+	req.AutomatedScope = scope
 	return &huma.StreamResponse{Body: func(hctx huma.Context) {
 		stream, ok := newHumaSSEStream(hctx)
 		if !ok {
@@ -142,11 +151,12 @@ func (s *Server) humaGenerateInsight(
 			return
 		}
 		prompt, err := insight.BuildPrompt(hctx.Context(), s.db, insight.GenerateRequest{
-			Type:     req.Type,
-			DateFrom: req.DateFrom,
-			DateTo:   req.DateTo,
-			Project:  req.Project,
-			Prompt:   req.Prompt,
+			Type:           req.Type,
+			DateFrom:       req.DateFrom,
+			DateTo:         req.DateTo,
+			Project:        req.Project,
+			Prompt:         req.Prompt,
+			AutomatedScope: req.AutomatedScope,
 		})
 		if err != nil {
 			log.Printf("insight prompt error: %v", err)

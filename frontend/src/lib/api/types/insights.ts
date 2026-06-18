@@ -46,6 +46,17 @@ export type AgentName =
   | "gemini"
   | "kiro";
 
+export interface InsightGenerationFilters {
+  timezone: string;
+  machine?: string;
+  agent?: string;
+  termination?: string;
+  min_user_messages?: number;
+  include_one_shot: boolean;
+  automated_scope?: AutomatedScope;
+  active_since?: string;
+}
+
 export interface GenerateInsightRequest {
   type: InsightType;
   date_from: string;
@@ -57,4 +68,5 @@ export interface GenerateInsightRequest {
   llm_opt_in?: boolean;
   force_refresh?: boolean;
   automated_scope?: AutomatedScope;
+  filters?: InsightGenerationFilters;
 }

@@ -77,6 +77,7 @@ beforeEach(() => {
   insights.setProject("");
   insights.setAgent("claude");
   insights.setAutomatedScope("human");
+  insights.setSessionFilters(undefined);
   insights.promptText = "";
 });
 
@@ -321,6 +322,45 @@ describe("generate (multi-task)", () => {
     );
   });
 
+  it("sends dashboard session filters for canned recommendations", async () => {
+    insights.setType("llm_canned");
+    insights.setCannedKind("prompt_maturity_review");
+    insights.setSessionFilters({
+      timezone: "America/New_York",
+      machine: "workstation",
+      agent: "codex",
+      termination: "clean",
+      min_user_messages: 2,
+      include_one_shot: false,
+      automated_scope: "human",
+      active_since: "2025-01-15T12:00:00.000Z",
+    });
+    vi.mocked(api.generateInsight).mockReturnValueOnce({
+      abort: vi.fn(),
+      done: Promise.resolve(makeInsight({ id: 31 })),
+    });
+
+    insights.generate();
+
+    expect(api.generateInsight).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "llm_canned",
+        filters: {
+          timezone: "America/New_York",
+          machine: "workstation",
+          agent: "codex",
+          termination: "clean",
+          min_user_messages: 2,
+          include_one_shot: false,
+          automated_scope: "human",
+          active_since: "2025-01-15T12:00:00.000Z",
+        },
+      }),
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
   it("supports multiple concurrent tasks", async () => {
     const s1 = makeInsight({ id: 10 });
     const s2 = makeInsight({ id: 11 });
@@ -399,6 +439,13 @@ describe("generate (multi-task)", () => {
     insights.setProject("middleman");
     insights.setAgent("codex");
     insights.setAutomatedScope("automated");
+    insights.setSessionFilters({
+      timezone: "America/Chicago",
+      machine: "laptop",
+      agent: "codex",
+      include_one_shot: true,
+      automated_scope: "automated",
+    });
     insights.promptText = "Focus on cache misses";
 
     insights.generate();
@@ -408,6 +455,12 @@ describe("generate (multi-task)", () => {
     expect(failedTask.status).toBe("error");
 
     insights.promptText = "A different current focus";
+    insights.setSessionFilters({
+      timezone: "UTC",
+      machine: "other",
+      include_one_shot: false,
+      automated_scope: "human",
+    });
     insights.retryTask(failedTask.clientId);
 
     expect(insights.tasks).toHaveLength(1);
@@ -424,6 +477,13 @@ describe("generate (multi-task)", () => {
         kind: "model_cost_review",
         llm_opt_in: true,
         automated_scope: "automated",
+        filters: {
+          timezone: "America/Chicago",
+          machine: "laptop",
+          agent: "codex",
+          include_one_shot: true,
+          automated_scope: "automated",
+        },
       },
       expect.any(Function),
       expect.any(Function),

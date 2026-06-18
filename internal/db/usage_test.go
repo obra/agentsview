@@ -1814,6 +1814,72 @@ func TestUsageSessionFilters(t *testing.T) {
 	assert.Equal(t, 1, counts.Total, "counts.Total")
 }
 
+func TestUsageTerminationFilter(t *testing.T) {
+	d := testDB(t)
+	ctx := context.Background()
+
+	requireNoError(t, d.UpsertModelPricing([]ModelPricing{{
+		ModelPattern:  "claude-sonnet",
+		InputPerMTok:  3.0,
+		OutputPerMTok: 15.0,
+	}}), "UpsertModelPricing")
+
+	clean := "clean"
+	unclean := "tool_call_pending"
+	tokenUsage := json.RawMessage(
+		`{"input_tokens":1000,"output_tokens":500}`,
+	)
+	insertSession(t, d, "usage-filter-clean", "proj", func(s *Session) {
+		s.MessageCount = 4
+		s.UserMessageCount = 3
+		s.TerminationStatus = &clean
+		s.StartedAt = new("2024-06-15T10:00:00Z")
+	})
+	insertSession(t, d, "usage-filter-unclean", "proj", func(s *Session) {
+		s.MessageCount = 4
+		s.UserMessageCount = 3
+		s.TerminationStatus = &unclean
+		s.StartedAt = new("2024-06-15T10:00:00Z")
+	})
+	for _, sid := range []string{
+		"usage-filter-clean",
+		"usage-filter-unclean",
+	} {
+		insertMessages(t, d, Message{
+			SessionID:  sid,
+			Ordinal:    0,
+			Role:       "assistant",
+			Timestamp:  "2024-06-15T10:30:00Z",
+			Model:      "claude-sonnet",
+			TokenUsage: tokenUsage,
+		})
+	}
+
+	filter := UsageFilter{
+		From:        "2024-06-01",
+		To:          "2024-06-30",
+		Termination: "clean",
+	}
+	daily, err := d.GetDailyUsage(ctx, filter)
+	requireNoError(t, err, "GetDailyUsage termination filter")
+	if daily.Totals.InputTokens != 1000 {
+		t.Errorf("InputTokens = %d, want 1000",
+			daily.Totals.InputTokens)
+	}
+
+	top, err := d.GetTopSessionsByCost(ctx, filter, 10)
+	requireNoError(t, err, "GetTopSessionsByCost termination filter")
+	if len(top) != 1 || top[0].SessionID != "usage-filter-clean" {
+		t.Fatalf("top sessions = %+v, want only usage-filter-clean", top)
+	}
+
+	counts, err := d.GetUsageSessionCounts(ctx, filter)
+	requireNoError(t, err, "GetUsageSessionCounts termination filter")
+	if counts.Total != 1 {
+		t.Errorf("counts.Total = %d, want 1", counts.Total)
+	}
+}
+
 func TestUsageExcludeOneShotUsesUserMessageCount(t *testing.T) {
 	d := testDB(t)
 	ctx := context.Background()
