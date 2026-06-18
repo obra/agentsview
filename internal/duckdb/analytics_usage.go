@@ -1863,7 +1863,7 @@ func (s *Store) duckSignalMessages(
 		args[i] = r.ID
 	}
 	q := `SELECT session_id, ordinal, role, content,
-			COALESCE(timestamp, ''), is_system, has_tool_use
+			timestamp, is_system, has_tool_use
 		FROM messages
 		WHERE session_id IN (` + strings.Join(placeholders, ",") + `)
 		ORDER BY session_id, ordinal`
@@ -1874,13 +1874,15 @@ func (s *Store) duckSignalMessages(
 	defer msgRows.Close()
 	for msgRows.Next() {
 		var m db.SignalMessage
+		var ts any
 		if err := msgRows.Scan(
 			&m.SessionID, &m.Ordinal, &m.Role,
-			&m.Content, &m.Timestamp,
+			&m.Content, &ts,
 			&m.IsSystem, &m.HasToolUse,
 		); err != nil {
 			return nil, fmt.Errorf("scanning duckdb signal message: %w", err)
 		}
+		m.Timestamp = formatDBTime(ts)
 		out[m.SessionID] = append(out[m.SessionID], m)
 	}
 	if err := msgRows.Err(); err != nil {
@@ -2145,7 +2147,19 @@ func appendDuckUsageSessionFilterClauses(
 		where += "\n\t\t\tAND COALESCE(s.ended_at, s.started_at, s.created_at) >= CAST(? AS TIMESTAMP)"
 		args = append(args, f.ActiveSince)
 	}
+	if pred, predArgs := duckUsageTerminationPred(f.Termination); pred != "" {
+		where += "\n\t\t\tAND " + pred
+		args = append(args, predArgs...)
+	}
 	return where, args
+}
+
+func duckUsageTerminationPred(status string) (string, []any) {
+	return duckAnalyticsTerminationPred(
+		status,
+		"COALESCE(s.ended_at, s.started_at, s.created_at)",
+		"s.termination_status",
+	)
 }
 
 func duckUsageRawSQL(f db.UsageFilter, sessionID string) (string, []any) {
