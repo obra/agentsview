@@ -526,9 +526,13 @@ func (s *Server) listCannedCoachSessions(
 	if req.Filters != nil {
 		filters = *req.Filters
 	}
+	loc := cannedCoachLocation(filters.Timezone)
+	dateFrom, dateTo := cannedCoachUTCDateBounds(
+		req.DateFrom, req.DateTo, loc,
+	)
 	filter := db.SessionFilter{
-		DateFrom:        req.DateFrom,
-		DateTo:          req.DateTo,
+		DateFrom:        dateFrom,
+		DateTo:          dateTo,
 		Project:         req.Project,
 		Machine:         filters.Machine,
 		Agent:           filters.Agent,
@@ -545,10 +549,91 @@ func (s *Server) listCannedCoachSessions(
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, page.Sessions...)
+		for _, session := range page.Sessions {
+			if cannedCoachSessionInDateRange(
+				session, req.DateFrom, req.DateTo, loc,
+			) {
+				out = append(out, session)
+			}
+		}
 		if page.NextCursor == "" {
 			return out, nil
 		}
 		filter.Cursor = page.NextCursor
 	}
+}
+
+func cannedCoachLocation(name string) *time.Location {
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
+func cannedCoachUTCDateBounds(
+	from, to string,
+	loc *time.Location,
+) (string, string) {
+	start, err := time.ParseInLocation("2006-01-02", from, loc)
+	if err != nil {
+		return from, to
+	}
+	end, err := time.ParseInLocation("2006-01-02", to, loc)
+	if err != nil {
+		return from, to
+	}
+	end = end.AddDate(0, 0, 1).Add(-time.Nanosecond)
+	return start.UTC().Format("2006-01-02"),
+		end.UTC().Format("2006-01-02")
+}
+
+func cannedCoachSessionInDateRange(
+	session db.Session,
+	from, to string,
+	loc *time.Location,
+) bool {
+	date := cannedCoachSessionLocalDate(session, loc)
+	if date == "" {
+		return false
+	}
+	if from != "" && date < from {
+		return false
+	}
+	if to != "" && date > to {
+		return false
+	}
+	return true
+}
+
+func cannedCoachSessionLocalDate(
+	session db.Session,
+	loc *time.Location,
+) string {
+	ts := session.CreatedAt
+	if session.StartedAt != nil && *session.StartedAt != "" {
+		ts = *session.StartedAt
+	}
+	t, ok := cannedCoachLocalTime(ts, loc)
+	if !ok {
+		if len(ts) >= 10 {
+			return ts[:10]
+		}
+		return ""
+	}
+	return t.Format("2006-01-02")
+}
+
+func cannedCoachLocalTime(
+	ts string,
+	loc *time.Location,
+) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339Nano, ts)
+	if err != nil {
+		t, err = time.Parse("2006-01-02T15:04:05Z", ts)
+		if err != nil {
+			return time.Time{}, false
+		}
+	}
+	return t.In(loc), true
 }
