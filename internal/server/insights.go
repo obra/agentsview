@@ -61,6 +61,10 @@ func normalizeCannedSessionFilters(
 	if filters.Timezone == "" {
 		filters.Timezone = "UTC"
 	}
+	if _, err := time.LoadLocation(filters.Timezone); err != nil {
+		return insight.CannedSessionFilters{},
+			"invalid timezone: " + filters.Timezone, false
+	}
 	filters.Machine = strings.TrimSpace(filters.Machine)
 	filters.Agent = strings.TrimSpace(filters.Agent)
 	filters.Termination = strings.TrimSpace(filters.Termination)

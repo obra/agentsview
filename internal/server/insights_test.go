@@ -207,6 +207,16 @@ func TestGenerateCannedInsight_RequiresExplicitOptIn(t *testing.T) {
 	assertBodyContains(t, w, "llm_opt_in")
 }
 
+func TestGenerateCannedInsight_RejectsInvalidFilterTimezone(t *testing.T) {
+	te := setup(t)
+
+	w := te.post(t, "/api/v1/insights/generate",
+		`{"type":"llm_canned","kind":"prompt_maturity_review","date_from":"2025-01-15","date_to":"2025-01-15","agent":"claude","llm_opt_in":true,"filters":{"timezone":"Fake/Zone","include_one_shot":false,"automated_scope":"human"}}`)
+
+	assertStatus(t, w, http.StatusBadRequest)
+	assertBodyContains(t, w, "invalid timezone: Fake/Zone")
+}
+
 func TestGenerateCannedInsight_ReturnsValidationDetail(t *testing.T) {
 	stubGen := func(
 		_ context.Context, _, _ string, _ insight.LogFunc,
