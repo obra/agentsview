@@ -639,8 +639,8 @@ describe("AnalyticsStore automated scope params", () => {
 
     analytics.fetchSummary();
 
-    expect(api.getAnalyticsSummary).toHaveBeenLastCalledWith(
-      expect.objectContaining({ automated_scope: "all" }),
+    expect(analyticsService.getApiV1AnalyticsSummary).toHaveBeenLastCalledWith(
+      expect.objectContaining({ automatedScope: "all" }),
     );
   });
 
@@ -649,8 +649,8 @@ describe("AnalyticsStore automated scope params", () => {
 
     analytics.fetchSummary();
 
-    expect(api.getAnalyticsSummary).toHaveBeenLastCalledWith(
-      expect.objectContaining({ automated_scope: "automated" }),
+    expect(analyticsService.getApiV1AnalyticsSummary).toHaveBeenLastCalledWith(
+      expect.objectContaining({ automatedScope: "automated" }),
     );
   });
 });
@@ -920,13 +920,13 @@ describe("AnalyticsStore rolling default date range", () => {
     expect(analytics.selectedDate).toBeNull();
     expect(analytics.selectedDow).toBeNull();
     expect(analytics.selectedHour).toBeNull();
-    expect(api.getAnalyticsSignals).toHaveBeenCalledWith(
+    expect(analyticsService.getApiV1AnalyticsSignals).toHaveBeenCalledWith(
       expect.objectContaining({
         from: "2026-04-01",
         to: "2026-04-30",
       }),
     );
-    expect(api.getAnalyticsSignals).toHaveBeenCalledWith(
+    expect(analyticsService.getApiV1AnalyticsSignals).toHaveBeenCalledWith(
       expect.not.objectContaining({
         dow: expect.anything(),
         hour: expect.anything(),

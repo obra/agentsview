@@ -11,10 +11,7 @@
   import { renderMarkdown } from "../../utils/markdown.js";
   import { scoreToGrade } from "../../utils/grade.js";
   import { agentLabel } from "../../utils/agents.js";
-  import {
-    getAnalyticsSignalSessions,
-    type AnalyticsParams,
-  } from "../../api/client.js";
+  import { AnalyticsService } from "../../api/generated/index.js";
   import type {
     AgentName,
     AutomatedScope,
@@ -37,6 +34,9 @@
   } from "./qualityPatterns.js";
 
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+  type AnalyticsParams = Parameters<
+    typeof AnalyticsService.getApiV1AnalyticsSignals
+  >[0];
 
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
   let unsubEvents: (() => void) | undefined;
@@ -217,7 +217,7 @@
     signalExamplesLoading = true;
     signalExamplesError = null;
     try {
-      const response = await getAnalyticsSignalSessions({
+      const response = await AnalyticsService.getApiV1AnalyticsSignalSessions({
         ...params,
         signal,
         limit: 8,
@@ -227,7 +227,7 @@
         signalExamplesFilterKey === requestKey &&
         signalExamplesRequest === request
       ) {
-        signalExamples = response.sessions;
+        signalExamples = response.sessions ?? [];
       }
     } catch (err) {
       if (

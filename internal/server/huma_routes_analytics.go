@@ -44,6 +44,7 @@ type AnalyticsFilterInput struct {
 	Hour             optionalIntParam `query:"hour" minimum:"0" maximum:"23" doc:"Hour of day, 0 through 23"`
 	MinUserMessages  int              `query:"min_user_messages" minimum:"0" doc:"Minimum user message count"`
 	ActiveSince      string           `query:"active_since" format:"date-time" doc:"Filter sessions active since this RFC3339 timestamp"`
+	AutomatedScope   string           `query:"automated_scope" enum:"human,all,automated" doc:"Automation scope"`
 	IncludeOneShot   bool             `query:"include_one_shot" doc:"Include one-shot sessions"`
 	IncludeAutomated bool             `query:"include_automated" doc:"Include automated sessions"`
 	Termination      string           `query:"termination" doc:"Filter by termination reason"`
@@ -100,6 +101,7 @@ func analyticsFilterFromInput(in AnalyticsFilterInput) (db.AnalyticsFilter, erro
 		MinUserMessages:  in.MinUserMessages,
 		ExcludeOneShot:   !in.IncludeOneShot,
 		ExcludeAutomated: !in.IncludeAutomated,
+		AutomatedScope:   in.AutomatedScope,
 		ActiveSince:      in.ActiveSince,
 		Termination:      in.Termination,
 	}, nil

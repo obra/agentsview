@@ -10,6 +10,7 @@ import (
 
 	"go.kenn.io/agentsview/internal/db"
 	pricingpkg "go.kenn.io/agentsview/internal/pricing"
+	"go.kenn.io/agentsview/internal/signals"
 )
 
 const (
@@ -18,31 +19,40 @@ const (
 )
 
 type duckAnalyticsSession struct {
-	id                   string
-	project              string
-	machine              string
-	agent                string
-	firstMessage         *string
-	displayName          *string
-	startedAt            string
-	endedAt              string
-	createdAt            string
-	messageCount         int
-	userMessageCount     int
-	totalOutputTokens    int
-	hasTotalOutputTokens bool
-	isAutomated          bool
-	terminationStatus    *string
-	healthScore          *int
-	healthGrade          *string
-	outcome              string
-	outcomeConfidence    string
-	toolFailures         int
-	toolRetries          int
-	editChurn            int
-	compactions          int
-	midTaskCompactions   int
-	contextPressureMax   *float64
+	id                          string
+	project                     string
+	machine                     string
+	agent                       string
+	firstMessage                *string
+	displayName                 *string
+	startedAt                   string
+	endedAt                     string
+	createdAt                   string
+	messageCount                int
+	userMessageCount            int
+	totalOutputTokens           int
+	hasTotalOutputTokens        bool
+	isAutomated                 bool
+	terminationStatus           *string
+	healthScore                 *int
+	healthGrade                 *string
+	outcome                     string
+	outcomeConfidence           string
+	toolFailures                int
+	toolRetries                 int
+	editChurn                   int
+	compactions                 int
+	midTaskCompactions          int
+	contextPressureMax          *float64
+	qualitySignalVersion        int
+	shortPromptCount            int
+	unstructuredStart           bool
+	missingSuccessCriteriaCount int
+	missingVerificationCount    int
+	duplicatePromptCount        int
+	noCodeContextCount          int
+	runawayToolLoopCount        int
+	frustrationMarkerCount      int
 }
 
 func (s *Store) analyticsSessions(
@@ -71,7 +81,11 @@ func (s *Store) analyticsSessionsFiltered(
 			termination_status, health_score, health_grade, outcome,
 			outcome_confidence, tool_failure_signal_count,
 			tool_retry_count, edit_churn_count, compaction_count,
-			mid_task_compaction_count, context_pressure_max
+			mid_task_compaction_count, context_pressure_max,
+			quality_signal_version, short_prompt_count,
+			unstructured_start, missing_success_criteria_count,
+			missing_verification_count, duplicate_prompt_count,
+			no_code_context_count, runaway_tool_loop_count
 		FROM sessions s
 		WHERE `+where, args...)
 	if err != nil {
@@ -93,7 +107,11 @@ func (s *Store) analyticsSessionsFiltered(
 			&r.healthScore, &r.healthGrade, &r.outcome,
 			&r.outcomeConfidence, &r.toolFailures, &r.toolRetries,
 			&r.editChurn, &r.compactions, &r.midTaskCompactions,
-			&r.contextPressureMax,
+			&r.contextPressureMax, &r.qualitySignalVersion,
+			&r.shortPromptCount, &r.unstructuredStart,
+			&r.missingSuccessCriteriaCount, &r.missingVerificationCount,
+			&r.duplicatePromptCount, &r.noCodeContextCount,
+			&r.runawayToolLoopCount,
 		); err != nil {
 			return nil, fmt.Errorf("scanning duckdb analytics session: %w", err)
 		}
@@ -1681,21 +1699,166 @@ func (s *Store) GetAnalyticsSignals(
 	if err != nil {
 		return db.SignalsAnalyticsResponse{}, err
 	}
+	rows := duckSignalRowsFromSessions(sessions, f)
+	if err := s.duckPopulateFrustrationMarkers(ctx, rows); err != nil {
+		return db.SignalsAnalyticsResponse{}, err
+	}
+	return db.AggregateSignals(rows), nil
+}
+
+func (s *Store) GetAnalyticsSignalSessions(
+	ctx context.Context,
+	f db.AnalyticsFilter,
+	signal string,
+	limit int,
+) (db.SignalSessionsResponse, error) {
+	if !db.IsSupportedAnalyticsSignal(signal) {
+		return db.SignalSessionsResponse{}, db.ErrUnsupportedAnalyticsSignal
+	}
+	if limit <= 0 || limit > 20 {
+		limit = 10
+	}
+	sessions, err := s.analyticsSessions(ctx, f)
+	if err != nil {
+		return db.SignalSessionsResponse{}, err
+	}
+	rows := duckSignalRowsFromSessions(sessions, f)
+	if err := s.duckPopulateFrustrationMarkers(ctx, rows); err != nil {
+		return db.SignalSessionsResponse{}, err
+	}
+	candidates := db.SignalCandidates(rows, signal, limit)
+	messages, err := s.duckSignalMessages(ctx, candidates)
+	if err != nil {
+		return db.SignalSessionsResponse{}, err
+	}
+	return db.SignalSessionsResponse{
+		Signal:   signal,
+		Sessions: db.BuildSignalExamples(candidates, messages, signal),
+	}, nil
+}
+
+func duckSignalRowsFromSessions(
+	sessions []duckAnalyticsSession,
+	f db.AnalyticsFilter,
+) []db.SignalRow {
 	rows := make([]db.SignalRow, 0, len(sessions))
 	for _, r := range sessions {
 		rows = append(rows, db.SignalRow{
-			ID: r.id, Agent: r.agent, Project: r.project,
-			Date:        analyticsLocalDate(analyticsDateTime(r), f.Timezone),
-			HealthScore: r.healthScore, HealthGrade: r.healthGrade,
-			Outcome: r.outcome, OutcomeConfidence: r.outcomeConfidence,
-			ToolFailureSignalCount: r.toolFailures,
-			ToolRetryCount:         r.toolRetries, EditChurnCount: r.editChurn,
-			CompactionCount:        r.compactions,
-			MidTaskCompactionCount: r.midTaskCompactions,
-			ContextPressureMax:     r.contextPressureMax,
+			ID:                          r.id,
+			Agent:                       r.agent,
+			Project:                     r.project,
+			FirstMessage:                r.firstMessage,
+			IsAutomated:                 r.isAutomated,
+			Date:                        analyticsLocalDate(analyticsDateTime(r), f.Timezone),
+			HealthScore:                 r.healthScore,
+			HealthGrade:                 r.healthGrade,
+			Outcome:                     r.outcome,
+			OutcomeConfidence:           r.outcomeConfidence,
+			ToolFailureSignalCount:      r.toolFailures,
+			ToolRetryCount:              r.toolRetries,
+			EditChurnCount:              r.editChurn,
+			CompactionCount:             r.compactions,
+			MidTaskCompactionCount:      r.midTaskCompactions,
+			ContextPressureMax:          r.contextPressureMax,
+			QualitySignalVersion:        r.qualitySignalVersion,
+			ShortPromptCount:            r.shortPromptCount,
+			UnstructuredStart:           r.unstructuredStart,
+			MissingSuccessCriteriaCount: r.missingSuccessCriteriaCount,
+			MissingVerificationCount:    r.missingVerificationCount,
+			DuplicatePromptCount:        r.duplicatePromptCount,
+			NoCodeContextCount:          r.noCodeContextCount,
+			RunawayToolLoopCount:        r.runawayToolLoopCount,
+			FrustrationMarkerCount:      r.frustrationMarkerCount,
 		})
 	}
-	return db.AggregateSignals(rows), nil
+	return rows
+}
+
+func (s *Store) duckPopulateFrustrationMarkers(
+	ctx context.Context,
+	rows []db.SignalRow,
+) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	idx := make(map[string]int, len(rows))
+	placeholders := make([]string, len(rows))
+	args := make([]any, len(rows))
+	for i := range rows {
+		idx[rows[i].ID] = i
+		placeholders[i] = "?"
+		args[i] = rows[i].ID
+	}
+	q := `SELECT session_id, content, is_system
+		FROM messages
+		WHERE role = 'user' AND session_id IN (` +
+		strings.Join(placeholders, ",") + `)`
+	msgRows, err := s.duck.QueryContext(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("querying duckdb frustration markers: %w", err)
+	}
+	defer msgRows.Close()
+	for msgRows.Next() {
+		var sessionID, content string
+		var isSystem bool
+		if err := msgRows.Scan(
+			&sessionID, &content, &isSystem,
+		); err != nil {
+			return fmt.Errorf("scanning duckdb frustration marker: %w", err)
+		}
+		i, ok := idx[sessionID]
+		if !ok || isSystem {
+			continue
+		}
+		if signals.IsFrustrationMarker(content) {
+			rows[i].FrustrationMarkerCount++
+		}
+	}
+	if err := msgRows.Err(); err != nil {
+		return fmt.Errorf("iterating duckdb frustration markers: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) duckSignalMessages(
+	ctx context.Context,
+	rows []db.SignalRow,
+) (map[string][]db.SignalMessage, error) {
+	out := make(map[string][]db.SignalMessage, len(rows))
+	if len(rows) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(rows))
+	args := make([]any, len(rows))
+	for i, r := range rows {
+		placeholders[i] = "?"
+		args[i] = r.ID
+	}
+	q := `SELECT session_id, ordinal, role, content,
+			COALESCE(timestamp, ''), is_system, has_tool_use
+		FROM messages
+		WHERE session_id IN (` + strings.Join(placeholders, ",") + `)
+		ORDER BY session_id, ordinal`
+	msgRows, err := s.duck.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying duckdb signal messages: %w", err)
+	}
+	defer msgRows.Close()
+	for msgRows.Next() {
+		var m db.SignalMessage
+		if err := msgRows.Scan(
+			&m.SessionID, &m.Ordinal, &m.Role,
+			&m.Content, &m.Timestamp,
+			&m.IsSystem, &m.HasToolUse,
+		); err != nil {
+			return nil, fmt.Errorf("scanning duckdb signal message: %w", err)
+		}
+		out[m.SessionID] = append(out[m.SessionID], m)
+	}
+	if err := msgRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating duckdb signal messages: %w", err)
+	}
+	return out, nil
 }
 
 func (s *Store) GetTrendsTerms(
