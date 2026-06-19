@@ -358,36 +358,50 @@ function toolReliabilityPattern(
 ): QualityPatternView {
   const h = signals.tool_health;
   const total = totalSessions(signals);
+  const drivers: QualityPatternDriver[] = [
+    {
+      id: "tool_failure_signals",
+      label: "Failure signals",
+      total: h.total_failure_signals,
+      sessions: toolDriverSessions(
+        signals,
+        "tool_failure_signals",
+        h.sessions_with_failures,
+      ),
+    },
+    {
+      id: "tool_retries",
+      label: "Retries",
+      total: h.total_retries,
+      sessions: toolDriverSessions(
+        signals,
+        "tool_retries",
+        h.sessions_with_failures,
+      ),
+    },
+    {
+      id: "edit_churn",
+      label: "Edit churn",
+      total: h.total_edit_churn,
+      sessions: toolDriverSessions(
+        signals,
+        "edit_churn",
+        h.sessions_with_failures,
+      ),
+    },
+  ];
+  const affected = maxSessions(drivers);
 
   return {
     id: "tool_reliability",
     title: "Tool reliability",
     summary:
       "Tool failures, retries, and edit churn counted directly from session tool events.",
-    severity: severityFromRatio(h.sessions_with_failures, total),
-    severityDescription: severityDescription(h.sessions_with_failures, total),
-    affectedSessions: h.sessions_with_failures,
+    severity: severityFromRatio(affected, total),
+    severityDescription: severityDescription(affected, total),
+    affectedSessions: affected,
     totalSessions: total,
-    drivers: [
-      {
-        id: "tool_failure_signals",
-        label: "Failure signals",
-        total: h.total_failure_signals,
-        sessions: h.sessions_with_failures,
-      },
-      {
-        id: "tool_retries",
-        label: "Retries",
-        total: h.total_retries,
-        sessions: h.sessions_with_failures,
-      },
-      {
-        id: "edit_churn",
-        label: "Edit churn",
-        total: h.total_edit_churn,
-        sessions: h.sessions_with_failures,
-      },
-    ],
+    drivers,
     trend: signals.trend.map((t) => ({
       date: t.date,
       value: t.avg_failure_signals,
@@ -399,6 +413,14 @@ function toolReliabilityPattern(
     examplesLabel: "Comparison groups",
     action: "Inspect sessions with repeated failures or retries and fix brittle tool-use paths.",
   };
+}
+
+function toolDriverSessions(
+  signals: SignalsAnalyticsResponse,
+  signal: string,
+  fallback: number,
+): number {
+  return signals.calibration?.[signal]?.affected_sessions ?? fallback;
 }
 
 function signalDriver(

@@ -145,6 +145,63 @@ describe("quality pattern transforms", () => {
     );
   });
 
+  it("uses calibration session counts for retry and edit-churn tool reliability drivers", () => {
+    const toolReliability = buildQualityPatterns(
+      makeSignals({
+        tool_health: {
+          total_failure_signals: 0,
+          total_retries: 5,
+          total_edit_churn: 3,
+          sessions_with_failures: 0,
+          failure_rate: 0,
+        },
+        calibration: {
+          tool_retries: {
+            signal: "tool_retries",
+            affected_sessions: 3,
+            baseline_sessions: 3,
+            affected_incomplete_rate: 33.3,
+            baseline_incomplete_rate: 0,
+            incomplete_lift: null,
+            avg_score_delta: -12,
+          },
+          edit_churn: {
+            signal: "edit_churn",
+            affected_sessions: 2,
+            baseline_sessions: 4,
+            affected_incomplete_rate: 50,
+            baseline_incomplete_rate: 0,
+            incomplete_lift: null,
+            avg_score_delta: -8,
+          },
+        },
+      }),
+    ).find((pattern) => pattern.id === "tool_reliability");
+
+    expect(toolReliability).toBeDefined();
+    if (!toolReliability) return;
+    expect(toolReliability.affectedSessions).toBe(3);
+    expect(toolReliability.severity).toBe("critical");
+    expect(toolReliability.drivers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "tool_failure_signals",
+          sessions: 0,
+        }),
+        expect.objectContaining({
+          id: "tool_retries",
+          total: 5,
+          sessions: 3,
+        }),
+        expect.objectContaining({
+          id: "edit_churn",
+          total: 3,
+          sessions: 2,
+        }),
+      ]),
+    );
+  });
+
   it("surfaces missing code context as a context-health driver", () => {
     const context = buildQualityPatterns(makeSignals())[1];
 
